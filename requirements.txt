@@ -1,0 +1,41 @@
+# Hybrid-ViT Cascade Requirements
+
+# Core dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Training
+numpy>=1.23.0
+tqdm>=4.65.0
+wandb>=0.15.0
+
+# Image processing and data loading
+nibabel>=5.0.0
+SimpleITK>=2.2.0
+opencv-python>=4.7.0
+Pillow>=9.0.0
+scipy>=1.10.0
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.14.0
+
+# Medical imaging
+monai>=1.2.0
+
+# Configuration
+pyyaml>=6.0
+omegaconf>=2.3.0
+
+# Distributed training
+accelerate>=0.20.0
+
+# Memory optimization (optional, may need source build)
+# xformers>=0.0.20  # For efficient attention - uncomment if available
+
+# Evaluation
+scikit-image>=0.20.0
+torchmetrics>=1.0.0  # For PSNR, SSIM, and other metrics
+
+# Logging
+tensorboard>=2.13.0
