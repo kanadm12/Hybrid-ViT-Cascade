@@ -14,6 +14,7 @@ from pathlib import Path
 from .cascaded_depth_lifting import CascadedDepthLifting, ResolutionDepthPriors
 from .hybrid_vit_backbone import HybridViT3D
 from .diagnostic_losses import XrayConditioningModule, DRRRenderer, ProjectionLoss
+from .feature_metrics import MultiLevelFeatureExtractor
 
 
 class UnifiedCascadeStage(nn.Module):
@@ -140,7 +141,9 @@ class UnifiedHybridViTCascade(nn.Module):
                  time_embed_dim: int = 256,
                  num_timesteps: int = 1000,
                  v_parameterization: bool = True,
-                 share_view_weights: bool = False):
+                 share_view_weights: bool = False,
+                 extract_features: bool = True,
+                 feature_dims: List[int] = [32, 64, 128, 256]):
         super().__init__()
         
         self.stage_configs = stage_configs
@@ -149,6 +152,7 @@ class UnifiedHybridViTCascade(nn.Module):
         self.num_timesteps = num_timesteps
         self.num_views = num_views  # Store for reference
         self.time_embed_dim = time_embed_dim
+        self.extract_features = extract_features
         
         # Timestep embedding
         self.time_embed = nn.Sequential(
@@ -168,6 +172,14 @@ class UnifiedHybridViTCascade(nn.Module):
             cond_dim=1024,
             share_view_weights=share_view_weights
         )
+        
+        # Feature extractor (optional, for analysis)
+        if extract_features:
+            self.feature_extractor = MultiLevelFeatureExtractor(
+                in_channels=1,
+                feature_dims=feature_dims,
+                return_all_layers=True
+            )
         
         # Create cascade stages
         self.stages = nn.ModuleDict()
@@ -360,6 +372,75 @@ class UnifiedHybridViTCascade(nn.Module):
             }
         
         return total_loss
+    
+    def extract_feature_maps(self, 
+                            volume: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Extract multi-level feature maps from a 3D volume
+        
+        Args:
+            volume: (B, 1, D, H, W) - input 3D volume (clean or predicted)
+            
+        Returns:
+            features: Dictionary with feature maps at multiple levels
+        """
+        if not self.extract_features:
+            raise ValueError("Feature extraction is disabled. Set extract_features=True during initialization.")
+        
+        return self.feature_extractor(volume)
+    
+    def compute_feature_accuracy(self,
+                                 base_ct: torch.Tensor,
+                                 generated_ct: torch.Tensor) -> Dict[str, float]:
+        """
+        Compute accuracy metrics between base CT and generated CT feature maps
+        
+        Args:
+            base_ct: (B, 1, D, H, W) - ground truth CT volume
+            generated_ct: (B, 1, D, H, W) - generated CT volume
+            
+        Returns:
+            metrics: Dictionary of accuracy metrics (converted to float for logging)
+        """
+        if not self.extract_features:
+            raise ValueError("Feature extraction is disabled. Set extract_features=True during initialization.")
+        
+        # Extract features
+        features_base = self.feature_extractor(base_ct)
+        features_gen = self.feature_extractor(generated_ct)
+        
+        metrics = {}
+        
+        # Compute metrics per level
+        for level_name in features_base.keys():
+            feat_base = features_base[level_name]
+            feat_gen = features_gen[level_name]
+            
+            # MSE
+            mse = F.mse_loss(feat_base, feat_gen).item()
+            metrics[f'{level_name}_mse'] = mse
+            
+            # Cosine similarity
+            feat_base_norm = F.normalize(feat_base, p=2, dim=1)
+            feat_gen_norm = F.normalize(feat_gen, p=2, dim=1)
+            cos_sim = (feat_base_norm * feat_gen_norm).sum(dim=1).mean().item()
+            metrics[f'{level_name}_cosine'] = cos_sim
+            
+            # L1 distance
+            l1_dist = F.l1_loss(feat_base, feat_gen).item()
+            metrics[f'{level_name}_l1'] = l1_dist
+        
+        # Compute overall averages
+        mse_values = [v for k, v in metrics.items() if 'mse' in k]
+        metrics['overall_mse'] = sum(mse_values) / len(mse_values) if mse_values else 0.0
+        
+        cos_values = [v for k, v in metrics.items() if 'cosine' in k]
+        metrics['overall_cosine'] = sum(cos_values) / len(cos_values) if cos_values else 0.0
+        
+        l1_values = [v for k, v in metrics.items() if 'l1' in k]
+        metrics['overall_l1'] = sum(l1_values) / len(l1_values) if l1_values else 0.0
+        
+        return metrics
 
 
 # Example usage

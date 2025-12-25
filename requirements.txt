@@ -36,6 +36,7 @@ accelerate>=0.20.0
 # Evaluation
 scikit-image>=0.20.0
 torchmetrics>=1.0.0  # For PSNR, SSIM, and other metrics
+lpips>=0.1.4  # For perceptual similarity metrics
 
 # Logging
 tensorboard>=2.13.0

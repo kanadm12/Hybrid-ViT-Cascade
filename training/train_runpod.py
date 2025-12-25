@@ -25,6 +25,7 @@ sys.path.insert(0, str(parent_dir))
 
 from models.unified_model import UnifiedHybridViTCascade
 from utils.dataset import create_train_val_datasets
+from utils.visualization import visualize_epoch_features
 
 
 def verify_environment():
@@ -103,11 +104,27 @@ def train_stage_with_amp(
     checkpoint_dir: Path,
     config: Dict,
     prev_stage_model: Optional[UnifiedHybridViTCascade] = None,
-    tensorboard_writer: Optional[SummaryWriter] = None
+    tensorboard_writer: Optional[SummaryWriter] = None,
+    visualize_features: bool = True,
+    viz_dir: Optional[Path] = None
 ):
     """
     Train a single stage with mixed precision and gradient accumulation
     """
+    
+    # Setup visualization directory
+    if viz_dir is None:
+        viz_dir = checkpoint_dir / "visualizations"
+    viz_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Get a validation batch for feature visualization
+    val_batch_for_viz = None
+    if visualize_features:
+        try:
+            val_batch_for_viz = next(iter(val_loader))
+        except StopIteration:
+            print("Warning: Could not get validation batch for visualization")
+            visualize_features = False
     
     # Mixed precision scaler
     use_amp = config['training'].get('mixed_precision', False)
@@ -295,6 +312,23 @@ def train_stage_with_amp(
         # Step scheduler
         if scheduler is not None:
             scheduler.step(val_losses['total'])
+        
+        # Visualize feature maps after each epoch
+        if visualize_features and val_batch_for_viz is not None:
+            print(f"\n  Visualizing feature maps...")
+            try:
+                viz_figs = visualize_epoch_features(
+                    model=model,
+                    val_batch=val_batch_for_viz,
+                    epoch=epoch,
+                    stage_name=stage_name,
+                    save_dir=viz_dir,
+                    device=device,
+                    wandb_log=False  # RunPod uses tensorboard
+                )
+                print(f"  ✓ Feature maps saved to {viz_dir / f'epoch_{epoch:03d}'}")
+            except Exception as e:
+                print(f"  Warning: Feature visualization failed: {e}")
     
     return model
 
@@ -351,7 +385,9 @@ def main():
         xray_channels=1,
         num_views=config['xray_config']['num_views'],
         v_parameterization=config['training'].get('v_parameterization', True),
-        num_timesteps=config['training'].get('num_timesteps', 1000)
+        num_timesteps=config['training'].get('num_timesteps', 1000),
+        extract_features=True  # Enable feature extraction for visualization,
+        extract_features=True  # Enable feature extraction for visualization
     ).to(device)
     
     print(f"✓ Model created with {len(config['stage_configs'])} stages")
@@ -457,7 +493,9 @@ def main():
             checkpoint_dir=checkpoint_dir,
             config=config,
             prev_stage_model=prev_stage_model,
-            tensorboard_writer=tensorboard_writer
+            tensorboard_writer=tensorboard_writer,
+            visualize_features=config['training'].get('visualize_features', True),
+            viz_dir=checkpoint_dir / "visualizations"
         )
         
         # Save stage checkpoint

@@ -20,6 +20,7 @@ parent_dir = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(parent_dir / "hybrid_vit_cascade"))
 
 from models.unified_model import UnifiedHybridViTCascade
+from utils.visualization import visualize_epoch_features
 
 
 def load_config(config_path: str) -> Dict:
@@ -104,7 +105,9 @@ def train_stage(model: UnifiedHybridViTCascade,
                 device: torch.device,
                 checkpoint_dir: Path,
                 prev_stage_model: Optional[UnifiedHybridViTCascade] = None,
-                use_wandb: bool = False):
+                use_wandb: bool = False,
+                visualize_features: bool = True,
+                viz_dir: Optional[Path] = None):
     """
     Train a single stage
     
@@ -117,6 +120,26 @@ def train_stage(model: UnifiedHybridViTCascade,
         scheduler: Learning rate scheduler
         num_epochs: Number of epochs
         device: Device
+        checkpoint_dir: Directory to save checkpoints
+        prev_stage_model: Previous stage model (if cascading)
+        use_wandb: Whether to log to Weights & Biases
+        visualize_features: Whether to visualize feature maps after each epoch
+        viz_dir: Directory to save visualizations (defaults to checkpoint_dir/visualizations)
+    """
+    if viz_dir is None:
+        viz_dir = checkpoint_dir / "visualizations"
+    viz_dir.mkdir(parents=True, exist_ok=True)
+    
+    best_val_loss = float('inf')
+    
+    # Get a validation batch for feature visualization
+    val_batch_for_viz = None
+    if visualize_features:
+        try:
+            val_batch_for_viz = next(iter(val_loader))
+        except StopIteration:
+            print("Warning: Could not get validation batch for visualization")
+            visualize_features = False
         checkpoint_dir: Directory to save checkpoints
         prev_stage_model: Previous stage model (for cascading)
         use_wandb: Log to W&B
@@ -252,6 +275,23 @@ def train_stage(model: UnifiedHybridViTCascade,
         # Step scheduler
         if scheduler is not None:
             scheduler.step(val_losses['total'])
+        
+        # Visualize feature maps after each epoch
+        if visualize_features and val_batch_for_viz is not None:
+            print(f"\n  Visualizing feature maps...")
+            try:
+                viz_figs = visualize_epoch_features(
+                    model=model,
+                    val_batch=val_batch_for_viz,
+                    epoch=epoch,
+                    stage_name=stage_name,
+                    save_dir=viz_dir,
+                    device=device,
+                    wandb_log=use_wandb
+                )
+                print(f"  Feature maps saved to {viz_dir / f'epoch_{epoch:03d}'}")
+            except Exception as e:
+                print(f"  Warning: Feature visualization failed: {e}")
     
     return model
 
@@ -287,7 +327,8 @@ def main():
         xray_channels=config['xray_channels'],
         num_views=config['num_views'],
         v_parameterization=config.get('v_parameterization', True),
-        num_timesteps=config.get('num_timesteps', 1000)
+        num_timesteps=config.get('num_timesteps', 1000),
+        extract_features=True  # Enable feature extraction for visualization
     ).to(device)
     
     print(f"\nModel created with {len(config['stages'])} stages")
@@ -344,7 +385,9 @@ def main():
             device=device,
             checkpoint_dir=checkpoint_dir,
             prev_stage_model=prev_stage_model,
-            use_wandb=args.wandb
+            use_wandb=args.wandb,
+            visualize_features=config['training'].get('visualize_features', True),
+            viz_dir=checkpoint_dir / "visualizations"
         )
         
         # Save stage checkpoint

@@ -10,6 +10,14 @@ from typing import Dict, Optional, Tuple
 import sys
 from pathlib import Path
 
+# Import feature metrics
+from .feature_metrics import (
+    MultiLevelFeatureExtractor,
+    FeatureMapAccuracy,
+    LPIPS3D,
+    ComprehensiveFeatureMetrics
+)
+
 
 class DRRRenderer(nn.Module):
     """
@@ -162,7 +170,11 @@ class DiagnosticLosses(nn.Module):
     def __init__(self,
                  volume_size: Tuple[int, int, int],
                  use_perceptual: bool = True,
-                 use_frequency: bool = True):
+                 use_frequency: bool = True,
+                 use_feature_metrics: bool = True,
+                 use_lpips: bool = True,
+                 feature_dims: List[int] = [32, 64, 128, 256],
+                 lpips_net: str = 'alex'):
         super().__init__()
         
         self.volume_size = volume_size
@@ -178,6 +190,18 @@ class DiagnosticLosses(nn.Module):
         # Frequency decomposition
         self.use_frequency = use_frequency
         
+        # Feature metrics and LPIPS
+        self.use_feature_metrics = use_feature_metrics
+        self.use_lpips = use_lpips
+        
+        if use_feature_metrics or use_lpips:
+            self.comprehensive_metrics = ComprehensiveFeatureMetrics(
+                feature_dims=feature_dims,
+                lpips_net=lpips_net,
+                num_lpips_slices=16,
+                compute_lpips=use_lpips
+            )
+        
         # Loss weights (for ablation studies)
         self.loss_weights = {
             'diffusion': 1.0,
@@ -190,7 +214,12 @@ class DiagnosticLosses(nn.Module):
             'perceptual': 0.1,
             'frequency_low': 0.05,
             'frequency_high': 0.05,
-            'anatomical_prior': 0.1
+            'anatomical_prior': 0.1,
+            # New feature-based losses
+            'feature_mse': 0.15,
+            'feature_cosine': 0.1,
+            'feature_correlation': 0.05,
+            'lpips': 0.2
         }
     
     def compute_all_losses(self,
@@ -425,6 +454,52 @@ class DiagnosticLosses(nn.Module):
             losses['prior_improvement_ratio'] = torch.tensor(0.0, device=predicted.device)
         
         # ============================================================
+        # 9. FEATURE MAP ACCURACY & LPIPS - New additions
+        # ============================================================
+        if self.use_feature_metrics or self.use_lpips:
+            # Compute comprehensive feature metrics
+            feature_metrics = self.comprehensive_metrics(
+                base_ct=gt_x0,
+                generated_ct=pred_x0,
+                compute_lpips=self.use_lpips
+            )
+            
+            # Extract key metrics for loss computation
+            if self.use_feature_metrics:
+                losses['feature_mse'] = feature_metrics['overall_feature_mse']
+                losses['feature_cosine'] = 1.0 - feature_metrics['overall_feature_cosine']  # Convert to loss
+                losses['feature_correlation'] = 1.0 - feature_metrics['overall_feature_correlation']  # Convert to loss
+                losses['feature_ssim'] = 1.0 - feature_metrics['overall_feature_ssim']  # Convert to loss
+                losses['feature_style'] = feature_metrics['overall_feature_style']
+                
+                # Store per-level metrics for diagnostics (not used in total loss)
+                for k, v in feature_metrics.items():
+                    if k.startswith('level_'):
+                        losses[f'diagnostic_{k}'] = v
+            else:
+                losses['feature_mse'] = torch.tensor(0.0, device=predicted.device)
+                losses['feature_cosine'] = torch.tensor(0.0, device=predicted.device)
+                losses['feature_correlation'] = torch.tensor(0.0, device=predicted.device)
+                losses['feature_ssim'] = torch.tensor(0.0, device=predicted.device)
+                losses['feature_style'] = torch.tensor(0.0, device=predicted.device)
+            
+            # LPIPS loss
+            if self.use_lpips:
+                losses['lpips'] = feature_metrics['lpips_average']
+                losses['lpips_axial'] = feature_metrics['lpips_axial']
+                losses['lpips_coronal'] = feature_metrics['lpips_coronal']
+                losses['lpips_sagittal'] = feature_metrics['lpips_sagittal']
+            else:
+                losses['lpips'] = torch.tensor(0.0, device=predicted.device)
+        else:
+            losses['feature_mse'] = torch.tensor(0.0, device=predicted.device)
+            losses['feature_cosine'] = torch.tensor(0.0, device=predicted.device)
+            losses['feature_correlation'] = torch.tensor(0.0, device=predicted.device)
+            losses['feature_ssim'] = torch.tensor(0.0, device=predicted.device)
+            losses['feature_style'] = torch.tensor(0.0, device=predicted.device)
+            losses['lpips'] = torch.tensor(0.0, device=predicted.device)
+        
+        # ============================================================
         # WEIGHTED TOTAL LOSS
         # ============================================================
         total_loss = torch.tensor(0.0, device=predicted.device)
@@ -519,6 +594,29 @@ class DiagnosticLosses(nn.Module):
             else:
                 health['cascade'] = 'CRITICAL - Cascade not coherent'
         
+        # Feature map accuracy
+        if 'feature_mse' in losses and losses['feature_mse'] > 0:
+            if losses['feature_mse'] < 0.01:
+                health['feature_accuracy'] = 'EXCELLENT - Features match well'
+            elif losses['feature_mse'] < 0.05:
+                health['feature_accuracy'] = 'GOOD'
+            elif losses['feature_mse'] < 0.1:
+                health['feature_accuracy'] = 'WARNING - Feature mismatch'
+            else:
+                health['feature_accuracy'] = 'CRITICAL - Features very different'
+        
+        # LPIPS perceptual similarity
+        if 'lpips' in losses and losses['lpips'] > 0:
+            lpips_val = losses['lpips'].item() if torch.is_tensor(losses['lpips']) else losses['lpips']
+            if lpips_val < 0.1:
+                health['perceptual_similarity'] = 'EXCELLENT - Perceptually identical'
+            elif lpips_val < 0.3:
+                health['perceptual_similarity'] = 'GOOD'
+            elif lpips_val < 0.5:
+                health['perceptual_similarity'] = 'WARNING - Perceptual differences'
+            else:
+                health['perceptual_similarity'] = 'CRITICAL - Very different perceptually'
+        
         return health
 
 
@@ -556,7 +654,9 @@ if __name__ == "__main__":
     diagnostic = DiagnosticLosses(
         volume_size=(64, 64, 64),
         use_perceptual=True,
-        use_frequency=True
+        use_frequency=True,
+        use_feature_metrics=True,
+        use_lpips=True
     ).to(device)
     
     # Dummy data
@@ -598,3 +698,7 @@ if __name__ == "__main__":
     print("• frequency_high >> frequency_low → Missing fine details")
     print("• stage_transition > 0.1 → Cascade stages disconnected")
     print("• prior_improvement_ratio < 0 → Depth prior being ignored")
+    print("• feature_mse > 0.1 → Feature representations very different")
+    print("• lpips > 0.5 → Perceptually very different (0=identical, 1=max diff)")
+    print("• feature_cosine < 0.5 → Feature directions misaligned")
+    print("• feature_style > 0.01 → Texture/pattern mismatch")
