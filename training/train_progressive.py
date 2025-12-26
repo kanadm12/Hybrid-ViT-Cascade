@@ -140,10 +140,6 @@ def train_stage(model: UnifiedHybridViTCascade,
         except StopIteration:
             print("Warning: Could not get validation batch for visualization")
             visualize_features = False
-        checkpoint_dir: Directory to save checkpoints
-        prev_stage_model: Previous stage model (for cascading)
-        use_wandb: Log to W&B
-    """
     
     # Freeze all stages except current
     for name, stage in model.stages.items():
@@ -339,10 +335,9 @@ def main():
     prev_stage_model = None
     
     for stage_idx, stage_config in enumerate(config['stages']):
-        stage_name = stage_c with full config
-        train_loader, val_loader = create_dataloaders(
-            config=config,
-            stage_config=t(f"Training Stage {stage_idx + 1}/{len(config['stages'])}: {stage_name}")
+        stage_name = stage_config['name']
+        print(f"\n{'='*60}")
+        print(f"Training Stage {stage_idx + 1}/{len(config['stages'])}: {stage_name}")
         print(f"Volume size: {stage_config['volume_size']}")
         print(f"{'='*60}\n")
         

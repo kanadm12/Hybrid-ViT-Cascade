@@ -7,7 +7,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
-import wandb
+
+# Optional wandb - graceful fallback if not installed
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    print("Warning: wandb not installed. Install with: pip install wandb")
+    WANDB_AVAILABLE = False
+    wandb = None
 
 
 def plot_feature_maps(features: Dict[str, torch.Tensor],
@@ -33,6 +41,10 @@ def plot_feature_maps(features: Dict[str, torch.Tensor],
     Returns:
         matplotlib Figure object
     """
+    # Validate input
+    if not features or len(features) == 0:
+        raise ValueError("Features dictionary is empty")
+    
     num_levels = len(features)
     
     # Create figure with subplots
@@ -48,14 +60,27 @@ def plot_feature_maps(features: Dict[str, torch.Tensor],
     fig.suptitle(title, fontsize=16, fontweight='bold')
     
     for level_idx, (level_name, feat_tensor) in enumerate(sorted(features.items())):
+        # Validate tensor
+        if feat_tensor is None or feat_tensor.numel() == 0:
+            print(f"Warning: Empty tensor at {level_name}, skipping")
+            continue
+            
         # Move to CPU and get first batch item
         feat = feat_tensor[0].detach().cpu()  # (C, D, H, W) or (C, H, W)
         
-        # Handle 3D features - extract middle slice
+        # Handle 3D features - extract middle slice (reset slice_idx per level)
+        current_slice_idx = slice_idx
         if len(feat.shape) == 4:  # (C, D, H, W)
-            if slice_idx is None:
-                slice_idx = feat.shape[1] // 2  # Middle slice
-            feat = feat[:, slice_idx, :, :]  # (C, H, W)
+            if current_slice_idx is None:
+                current_slice_idx = feat.shape[1] // 2  # Middle slice along depth
+            # Clamp slice index to valid range
+            current_slice_idx = max(0, min(current_slice_idx, feat.shape[1] - 1))
+            feat = feat[:, current_slice_idx, :, :]  # (C, H, W)
+        
+        # Validate shape after slicing
+        if len(feat.shape) != 3:
+            print(f"Warning: Unexpected shape {feat.shape} at {level_name}, skipping")
+            continue
         
         # Get number of channels
         num_channels = feat.shape[0]
@@ -73,6 +98,9 @@ def plot_feature_maps(features: Dict[str, torch.Tensor],
                 vmin, vmax = channel_data.min(), channel_data.max()
                 if vmax - vmin > 1e-6:
                     channel_data = (channel_data - vmin) / (vmax - vmin)
+                else:
+                    # If constant, just use the data as-is
+                    pass
                 
                 im = ax.imshow(channel_data, cmap='viridis', aspect='auto')
                 ax.set_title(f'{level_name}\nCh {ch_idx}', fontsize=8)
@@ -94,9 +122,11 @@ def plot_feature_maps(features: Dict[str, torch.Tensor],
         print(f"Feature maps saved to {save_path}")
     
     # Log to wandb
-    if wandb_log:
+    if wandb_log and WANDB_AVAILABLE:
         wandb_key = f"{wandb_prefix}feature_maps" if wandb_prefix else "feature_maps"
         wandb.log({wandb_key: wandb.Image(fig)})
+    elif wandb_log and not WANDB_AVAILABLE:
+        print("Warning: wandb logging requested but wandb not available")
     
     return fig
 
@@ -137,15 +167,28 @@ def plot_feature_comparison(features_base: Dict[str, torch.Tensor],
     fig.suptitle(title, fontsize=16, fontweight='bold')
     
     for level_idx, level_name in enumerate(level_names):
+        # Validate tensors exist
+        if level_name not in features_base or level_name not in features_gen:
+            print(f"Warning: {level_name} missing in one of the feature dicts, skipping")
+            continue
+            
         feat_base = features_base[level_name][0].detach().cpu()  # First batch item
         feat_gen = features_gen[level_name][0].detach().cpu()
         
-        # Handle 3D features
+        # Handle 3D features (reset slice_idx per level)
+        current_slice_idx = slice_idx
         if len(feat_base.shape) == 4:  # (C, D, H, W)
-            if slice_idx is None:
-                slice_idx = feat_base.shape[1] // 2
-            feat_base = feat_base[:, slice_idx, :, :]
-            feat_gen = feat_gen[:, slice_idx, :, :]
+            if current_slice_idx is None:
+                current_slice_idx = feat_base.shape[1] // 2  # Middle slice
+            # Clamp to valid range
+            current_slice_idx = max(0, min(current_slice_idx, feat_base.shape[1] - 1))
+            feat_base = feat_base[:, current_slice_idx, :, :]
+            feat_gen = feat_gen[:, current_slice_idx, :, :]
+        
+        # Validate shapes match
+        if feat_base.shape != feat_gen.shape:
+            print(f"Warning: Shape mismatch at {level_name}: {feat_base.shape} vs {feat_gen.shape}")
+            continue
         
         # Average across channels for visualization
         feat_base_avg = feat_base.mean(dim=0).numpy()
@@ -186,9 +229,11 @@ def plot_feature_comparison(features_base: Dict[str, torch.Tensor],
         print(f"Feature comparison saved to {save_path}")
     
     # Log to wandb
-    if wandb_log:
+    if wandb_log and WANDB_AVAILABLE:
         wandb_key = f"{wandb_prefix}feature_comparison" if wandb_prefix else "feature_comparison"
         wandb.log({wandb_key: wandb.Image(fig)})
+    elif wandb_log and not WANDB_AVAILABLE:
+        print("Warning: wandb logging requested but wandb not available")
     
     return fig
 
@@ -267,9 +312,11 @@ def plot_feature_accuracy_heatmap(accuracy_metrics: Dict[str, float],
         print(f"Feature accuracy heatmap saved to {save_path}")
     
     # Log to wandb
-    if wandb_log:
+    if wandb_log and WANDB_AVAILABLE:
         wandb_key = f"{wandb_prefix}feature_accuracy_heatmap" if wandb_prefix else "feature_accuracy_heatmap"
         wandb.log({wandb_key: wandb.Image(fig)})
+    elif wandb_log and not WANDB_AVAILABLE:
+        print("Warning: wandb logging requested but wandb not available")
     
     return fig
 
@@ -346,6 +393,16 @@ def visualize_epoch_features(model,
             sqrt_one_minus_alphas_t = model.sqrt_one_minus_alphas_cumprod[t].view(-1, 1, 1, 1, 1)
             pred_volume = (noisy_volume - sqrt_one_minus_alphas_t * predicted_noise) / (sqrt_alphas_t + 1e-8)
         
+        # Clamp predicted volume to reasonable range
+        pred_volume = torch.clamp(pred_volume, -10.0, 10.0)
+        
+        # Ensure predicted volume matches GT volume size
+        if pred_volume.shape != gt_volume.shape:
+            print(f"Warning: Shape mismatch - GT: {gt_volume.shape}, Pred: {pred_volume.shape}")
+            pred_volume = torch.nn.functional.interpolate(
+                pred_volume, size=gt_volume.shape[2:], mode='trilinear', align_corners=True
+            )
+        
         # Extract features from both GT and predicted
         features_gt = model.extract_feature_maps(gt_volume)
         features_pred = model.extract_feature_maps(pred_volume)
@@ -403,11 +460,13 @@ def visualize_epoch_features(model,
         plt.close(fig_heatmap)
         
         # Log accuracy metrics to wandb
-        if wandb_log:
+        if wandb_log and WANDB_AVAILABLE:
             wandb_metrics = {f"{stage_name}/feature_accuracy/{k}": v 
                            for k, v in accuracy_metrics.items()}
             wandb_metrics['epoch'] = epoch
             wandb.log(wandb_metrics)
+        elif wandb_log and not WANDB_AVAILABLE:
+            print("Warning: wandb logging requested but wandb not available")
     
     model.train()
     return figures

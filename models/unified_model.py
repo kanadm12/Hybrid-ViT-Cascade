@@ -360,8 +360,9 @@ class UnifiedHybridViTCascade(nn.Module):
             # Average loss across all views
             physics_loss = sum(view_losses) / len(view_losses)
         
-        # Total loss
-        physics_weight = 0.3  # Can be stage-dependent
+        # Total loss - use stage-specific physics weight from config
+        stage_config = next((s for s in self.stage_configs if s['name'] == stage_name), None)
+        physics_weight = stage_config.get('physics_weight', 0.3) if stage_config else 0.3
         total_loss = diffusion_loss + physics_weight * physics_loss
         
         if return_loss_dict:

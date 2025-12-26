@@ -7,7 +7,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Tuple
-import lpips
+
+# Optional lpips - graceful fallback if not installed
+try:
+    import lpips
+    LPIPS_AVAILABLE = True
+except ImportError:
+    print("Warning: lpips not installed. Install with: pip install lpips")
+    LPIPS_AVAILABLE = False
+    lpips = None
 
 
 class MultiLevelFeatureExtractor(nn.Module):

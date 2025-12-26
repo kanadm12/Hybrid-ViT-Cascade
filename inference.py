@@ -11,7 +11,16 @@ import json
 import nibabel as nib
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
+
+# Optional metrics - graceful fallback if not installed
+try:
+    from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
+    METRICS_AVAILABLE = True
+except ImportError:
+    print("Warning: torchmetrics not installed. Install with: pip install torchmetrics")
+    METRICS_AVAILABLE = False
+    PeakSignalNoiseRatio = None
+    StructuralSimilarityIndexMeasure = None
 
 from models.unified_model import UnifiedHybridViTCascade
 from utils.dataset import PatientDRRDataset
