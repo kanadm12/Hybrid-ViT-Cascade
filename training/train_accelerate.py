@@ -371,12 +371,17 @@ def train_stage(model,
                         _ = unwrapped_model(sample_volume, sample_xrays, stage_name, None)
                         
                         if hasattr(unwrapped_model, 'last_features') and unwrapped_model.last_features:
+                            # Format features for plotting (rename keys to level_X format)
+                            formatted_features = {}
+                            for i, (key, value) in enumerate(unwrapped_model.last_features.items()):
+                                formatted_features[f'level_{i}_{key}'] = value
+                            
                             # Save to workspace/feature_maps instead of checkpoint dir
                             features_dir = Path('/workspace/feature_maps') / stage_name
                             features_dir.mkdir(parents=True, exist_ok=True)
                             
                             plot_feature_maps(
-                                unwrapped_model.last_features,
+                                formatted_features,
                                 save_path=features_dir / f'epoch_{epoch+1}.png'
                             )
                             print(f"  Saved feature maps to {features_dir / f'epoch_{epoch+1}.png'}")

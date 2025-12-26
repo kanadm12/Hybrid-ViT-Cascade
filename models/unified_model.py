@@ -153,6 +153,7 @@ class UnifiedHybridViTCascade(nn.Module):
         self.num_views = num_views  # Store for reference
         self.time_embed_dim = time_embed_dim
         self.extract_features = extract_features
+        self.last_features = None  # Store features for visualization
         
         # Timestep embedding
         self.time_embed = nn.Sequential(
@@ -288,6 +289,14 @@ class UnifiedHybridViTCascade(nn.Module):
         
         # Encode X-rays - now returns 3 outputs
         xray_context, time_xray_cond, xray_features_2d = self.xray_encoder(xrays, t_embed)
+        
+        # Store features for visualization
+        if self.extract_features:
+            self.last_features = {
+                'xray_context': xray_context.detach().cpu(),
+                'xray_features_2d': xray_features_2d.detach().cpu(),
+                'noisy_volume': x_noisy[0:1].detach().cpu()  # Store first sample only
+            }
         
         # Get stage
         stage = self.stages[stage_name]
