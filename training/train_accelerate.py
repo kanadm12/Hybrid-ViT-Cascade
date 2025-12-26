@@ -237,8 +237,15 @@ def train_stage(model,
                     sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * noise
                 )
                 
-                # Predict the noise
-                predicted_noise = stage(noisy_volume, t, xrays)
+                # Get X-ray embeddings and conditioning (same as in main forward)
+                xray_features = unwrapped_model.xray_encoder(xrays)
+                xray_context = xray_features
+                time_embed = unwrapped_model.time_mlp(t)
+                xray_cond_embed = unwrapped_model.xray_cond_encoder(xrays)
+                time_xray_cond = time_embed + xray_cond_embed
+                
+                # Predict the noise with proper arguments
+                predicted_noise = stage(noisy_volume, xray_features, xray_context, time_xray_cond, prev_stage_volume=None)
                 
                 # Denoise to get prediction
                 pred_volume = (
