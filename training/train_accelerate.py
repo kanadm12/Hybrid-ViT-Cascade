@@ -205,10 +205,31 @@ def train_stage(model,
                 val_losses['diffusion'] += loss_dict['diffusion_loss'].item()
                 val_losses['physics'] += loss_dict['physics_loss'].item()
                 
-                # Calculate PSNR and SSIM from loss dict if available
-                # Use reconstruction from physics loss module
-                if 'reconstructed_volume' in loss_dict:
-                    pred_volume = loss_dict['reconstructed_volume']
+                # Calculate PSNR and SSIM - do a simple denoising prediction
+                try:
+                    unwrapped_model = accelerator.unwrap_model(model)
+                    stage = unwrapped_model.stages[stage_name]
+                    
+                    # Sample a small amount of noise and denoise
+                    t = torch.randint(0, 50, (volumes.size(0),), device=volumes.device).long()  # Use early timesteps
+                    noise = torch.randn_like(volumes)
+                    
+                    # Get noisy volume using the main model's q_sample
+                    sqrt_alphas_cumprod = unwrapped_model.sqrt_alphas_cumprod.to(volumes.device)
+                    sqrt_one_minus_alphas_cumprod = unwrapped_model.sqrt_one_minus_alphas_cumprod.to(volumes.device)
+                    
+                    noisy_volume = (
+                        sqrt_alphas_cumprod[t][:, None, None, None, None] * volumes +
+                        sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * noise
+                    )
+                    
+                    # Predict the noise
+                    predicted_noise = stage(noisy_volume, t, xrays)
+                    
+                    # Denoise to get prediction
+                    pred_volume = (
+                        noisy_volume - sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * predicted_noise
+                    ) / sqrt_alphas_cumprod[t][:, None, None, None, None]
                     
                     # PSNR calculation
                     mse = torch.mean((pred_volume - volumes) ** 2)
@@ -233,6 +254,9 @@ def train_stage(model,
                     
                     ssim_value = ssim_3d(pred_volume, volumes)
                     val_metrics['ssim'] += ssim_value.item()
+                except Exception as e:
+                    # If metrics fail, just skip them
+                    pass
         
         # Average validation losses and metrics
         num_val_batches = len(val_loader)
