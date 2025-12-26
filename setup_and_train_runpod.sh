@@ -120,8 +120,8 @@ if [ -z "$DATA_DIR" ]; then
     fi
 fi
 
-# Count patient folders
-PATIENT_COUNT=$(find "$DATA_DIR" -maxdepth 1 -type d -name "patient_*" | wc -l)
+# Count patient folders (any subdirectories)
+PATIENT_COUNT=$(find "$DATA_DIR" -maxdepth 1 -type d ! -path "$DATA_DIR" | wc -l)
 print_status "Data directory: $DATA_DIR"
 print_status "Found $PATIENT_COUNT patient folders"
 
