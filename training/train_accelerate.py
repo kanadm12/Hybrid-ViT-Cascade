@@ -224,40 +224,50 @@ def train_stage(model,
                 unwrapped_model = accelerator.unwrap_model(model)
                 stage = unwrapped_model.stages[stage_name]
                 
-                # Sample a small amount of noise and denoise
-                t = torch.randint(0, 50, (volumes.size(0),), device=volumes.device).long()
-                noise = torch.randn_like(volumes)
+                # Do proper DDIM sampling (lightweight: 20 steps instead of 1000)
+                num_inference_steps = 20
+                timesteps = torch.linspace(unwrapped_model.num_timesteps - 1, 0, num_inference_steps).long().to(volumes.device)
                 
-                # Get noisy volume using the main model's q_sample
-                sqrt_alphas_cumprod = unwrapped_model.sqrt_alphas_cumprod.to(volumes.device)
-                sqrt_one_minus_alphas_cumprod = unwrapped_model.sqrt_one_minus_alphas_cumprod.to(volumes.device)
+                # Start from pure noise
+                pred_volume = torch.randn_like(volumes)
                 
-                noisy_volume = (
-                    sqrt_alphas_cumprod[t][:, None, None, None, None] * volumes +
-                    sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * noise
-                )
-                
-                # Create timestep embeddings (matching main forward)
-                t_normalized = t.float() / unwrapped_model.num_timesteps
-                t_embed = unwrapped_model.time_embed(t_normalized.unsqueeze(-1))
-                
-                # Encode X-rays - returns 3 outputs: (xray_context, time_xray_cond, xray_features_2d)
-                xray_context, time_xray_cond, xray_features_2d = unwrapped_model.xray_encoder(xrays, t_embed)
-                
-                # Predict the noise with proper arguments (matching stage forward)
-                predicted_noise = stage(
-                    noisy_volume=noisy_volume,
-                    xray_features=xray_features_2d,
-                    xray_context=xray_features_2d,  # Use 2D features for cross-attention
-                    time_xray_cond=time_xray_cond,
-                    prev_stage_volume=None,
-                    prev_stage_embed=None
-                )
-                
-                # Denoise to get prediction
-                pred_volume = (
-                    noisy_volume - sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * predicted_noise
-                ) / sqrt_alphas_cumprod[t][:, None, None, None, None]
+                # DDIM denoising loop
+                for i, t in enumerate(timesteps):
+                    t_batch = torch.full((volumes.size(0),), t, device=volumes.device, dtype=torch.long)
+                    
+                    # Create timestep embeddings
+                    t_normalized = t_batch.float() / unwrapped_model.num_timesteps
+                    t_embed = unwrapped_model.time_embed(t_normalized.unsqueeze(-1))
+                    
+                    # Encode X-rays
+                    xray_context, time_xray_cond, xray_features_2d = unwrapped_model.xray_encoder(xrays, t_embed)
+                    
+                    # Predict noise/velocity
+                    model_output = stage(
+                        noisy_volume=pred_volume,
+                        xray_features=xray_features_2d,
+                        xray_context=xray_features_2d,
+                        time_xray_cond=time_xray_cond,
+                        prev_stage_volume=None,
+                        prev_stage_embed=None
+                    )
+                    
+                    # DDIM step (simplified - using v-prediction)
+                    alpha_t = unwrapped_model.alphas_cumprod[t_batch][:, None, None, None, None]
+                    alpha_prev = unwrapped_model.alphas_cumprod[timesteps[i+1]][:, None, None, None, None] if i < len(timesteps) - 1 else torch.ones_like(alpha_t)
+                    
+                    # Convert v-prediction to x0 prediction
+                    sqrt_alpha_t = torch.sqrt(alpha_t)
+                    sqrt_one_minus_alpha_t = torch.sqrt(1 - alpha_t)
+                    
+                    pred_x0 = sqrt_alpha_t * pred_volume - sqrt_one_minus_alpha_t * model_output
+                    
+                    # DDIM update
+                    if i < len(timesteps) - 1:
+                        noise = torch.randn_like(pred_volume) * 0.0  # Deterministic DDIM
+                        pred_volume = torch.sqrt(alpha_prev) * pred_x0 + torch.sqrt(1 - alpha_prev) * model_output + noise
+                    else:
+                        pred_volume = pred_x0
                 
                 # PSNR calculation
                 mse = torch.mean((pred_volume - volumes) ** 2)
