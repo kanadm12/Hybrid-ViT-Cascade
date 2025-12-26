@@ -114,7 +114,7 @@ def visualize_alignment(data: dict, save_path: str = None):
 
 def main():
     parser = argparse.ArgumentParser(description='Visualize DRR-CT alignment')
-    parser.add_argument('--data_path', type=str, default='/workspace/drr_patient_data',
+    parser.add_argument('--data_path', type=str, default='workspace/drr_patient_data',
                        help='Path to patient data directory')
     parser.add_argument('--patient_idx', type=int, default=0,
                        help='Index of patient to visualize (0-based)')

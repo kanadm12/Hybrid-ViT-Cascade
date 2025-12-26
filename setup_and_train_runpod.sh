@@ -90,10 +90,10 @@ echo ""
 echo "Step 4: Verifying data directory..."
 
 DATA_PATHS=(
-    "/workspace/drr_patient_data"
+    "workspace/drr_patient_data"
     "./workspace/drr_patient_data"
+    "/workspace/drr_patient_data"
     "../workspace/drr_patient_data"
-    "/data/drr_patient_data"
 )
 
 DATA_DIR=""
