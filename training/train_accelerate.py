@@ -238,10 +238,10 @@ def train_stage(model,
                 )
                 
                 # Get X-ray embeddings and conditioning (same as in main forward)
-                xray_features = unwrapped_model.xray_encoder(xrays)
+                xray_features = unwrapped_model.xray_encoder(xrays, t)
                 xray_context = xray_features
                 time_embed = unwrapped_model.time_mlp(t)
-                xray_cond_embed = unwrapped_model.xray_cond_encoder(xrays)
+                xray_cond_embed = unwrapped_model.xray_cond_encoder(xrays, t)
                 time_xray_cond = time_embed + xray_cond_embed
                 
                 # Predict the noise with proper arguments
