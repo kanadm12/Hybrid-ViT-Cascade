@@ -204,71 +204,84 @@ def train_stage(model,
                 val_losses['total'] += loss_dict['loss'].item()
                 val_losses['diffusion'] += loss_dict['diffusion_loss'].item()
                 val_losses['physics'] += loss_dict['physics_loss'].item()
-                
-                # Calculate PSNR and SSIM - do a simple denoising prediction
-                try:
-                    unwrapped_model = accelerator.unwrap_model(model)
-                    stage = unwrapped_model.stages[stage_name]
-                    
-                    # Sample a small amount of noise and denoise
-                    t = torch.randint(0, 50, (volumes.size(0),), device=volumes.device).long()  # Use early timesteps
-                    noise = torch.randn_like(volumes)
-                    
-                    # Get noisy volume using the main model's q_sample
-                    sqrt_alphas_cumprod = unwrapped_model.sqrt_alphas_cumprod.to(volumes.device)
-                    sqrt_one_minus_alphas_cumprod = unwrapped_model.sqrt_one_minus_alphas_cumprod.to(volumes.device)
-                    
-                    noisy_volume = (
-                        sqrt_alphas_cumprod[t][:, None, None, None, None] * volumes +
-                        sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * noise
-                    )
-                    
-                    # Predict the noise
-                    predicted_noise = stage(noisy_volume, t, xrays)
-                    
-                    # Denoise to get prediction
-                    pred_volume = (
-                        noisy_volume - sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * predicted_noise
-                    ) / sqrt_alphas_cumprod[t][:, None, None, None, None]
-                    
-                    # PSNR calculation
-                    mse = torch.mean((pred_volume - volumes) ** 2)
-                    if mse > 0:
-                        psnr = 20 * torch.log10(2.0 / torch.sqrt(mse))  # Assuming normalized range [-1, 1]
-                        val_metrics['psnr'] += psnr.item()
-                    
-                    # SSIM calculation (simplified version)
-                    def ssim_3d(img1, img2):
-                        C1 = (0.01 * 2) ** 2
-                        C2 = (0.03 * 2) ** 2
-                        
-                        mu1 = torch.mean(img1)
-                        mu2 = torch.mean(img2)
-                        sigma1_sq = torch.var(img1)
-                        sigma2_sq = torch.var(img2)
-                        sigma12 = torch.mean((img1 - mu1) * (img2 - mu2))
-                        
-                        ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
-                               ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
-                        return ssim
-                    
-                    ssim_value = ssim_3d(pred_volume, volumes)
-                    val_metrics['ssim'] += ssim_value.item()
-                except Exception as e:
-                    # If metrics fail, just skip them
-                    pass
         
-        # Average validation losses and metrics
+        # Calculate PSNR and SSIM on first validation batch only (to save time)
+        if accelerator.is_main_process:
+            try:
+                # Get one batch for metrics
+                val_iter = iter(val_loader)
+                batch_data = next(val_iter)
+                
+                if isinstance(batch_data, dict):
+                    volumes = batch_data['ct_volume']
+                    xrays = batch_data['drr_stacked']
+                else:
+                    volumes, xrays = batch_data
+                
+                volumes = volumes.to(accelerator.device)
+                xrays = xrays.to(accelerator.device)
+                
+                unwrapped_model = accelerator.unwrap_model(model)
+                stage = unwrapped_model.stages[stage_name]
+                
+                # Sample a small amount of noise and denoise
+                t = torch.randint(0, 50, (volumes.size(0),), device=volumes.device).long()
+                noise = torch.randn_like(volumes)
+                
+                # Get noisy volume using the main model's q_sample
+                sqrt_alphas_cumprod = unwrapped_model.sqrt_alphas_cumprod.to(volumes.device)
+                sqrt_one_minus_alphas_cumprod = unwrapped_model.sqrt_one_minus_alphas_cumprod.to(volumes.device)
+                
+                noisy_volume = (
+                    sqrt_alphas_cumprod[t][:, None, None, None, None] * volumes +
+                    sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * noise
+                )
+                
+                # Predict the noise
+                predicted_noise = stage(noisy_volume, t, xrays)
+                
+                # Denoise to get prediction
+                pred_volume = (
+                    noisy_volume - sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * predicted_noise
+                ) / sqrt_alphas_cumprod[t][:, None, None, None, None]
+                
+                # PSNR calculation
+                mse = torch.mean((pred_volume - volumes) ** 2)
+                if mse > 0:
+                    psnr = 20 * torch.log10(2.0 / torch.sqrt(mse))
+                    val_metrics['psnr'] = psnr.item()
+                
+                # SSIM calculation
+                C1 = (0.01 * 2) ** 2
+                C2 = (0.03 * 2) ** 2
+                
+                mu1 = torch.mean(pred_volume)
+                mu2 = torch.mean(volumes)
+                sigma1_sq = torch.var(pred_volume)
+                sigma2_sq = torch.var(volumes)
+                sigma12 = torch.mean((pred_volume - mu1) * (volumes - mu2))
+                
+                ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+                       ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+                val_metrics['ssim'] = ssim.item()
+                
+                print(f"  [DEBUG] Calculated PSNR: {val_metrics['psnr']:.2f} dB, SSIM: {val_metrics['ssim']:.4f}")
+                
+            except Exception as e:
+                print(f"  [WARNING] Failed to calculate PSNR/SSIM: {e}")
+                import traceback
+                traceback.print_exc()
+                val_metrics['psnr'] = 0.0
+                val_metrics['ssim'] = 0.0
+        
+        # Average validation losses (metrics already calculated on main process)
         num_val_batches = len(val_loader)
         for key in val_losses:
             val_losses[key] /= num_val_batches
-        for key in val_metrics:
-            val_metrics[key] /= num_val_batches
         
-        # Gather validation losses and metrics
+        # Gather validation losses
         val_losses = {k: accelerator.gather(torch.tensor(v).to(accelerator.device)).mean().item() 
-                     for k, v in val_losses.items()}
-        val_metrics = {k: accelerator.gather(torch.tensor(v).to(accelerator.device)).mean().item() 
+                     for k, v in val_losses.items()} 
                       for k, v in val_metrics.items()}
         
         # Logging (main process only)
