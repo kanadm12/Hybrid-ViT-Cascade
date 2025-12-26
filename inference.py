@@ -237,6 +237,10 @@ def main():
                        help='Number of diffusion sampling steps (more=slower but better)')
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to run inference on')
+    parser.add_argument('--flip_drrs_vertical', action='store_true',
+                       help='Vertically flip DRRs (overrides config setting)')
+    parser.add_argument('--no_flip_drrs_vertical', action='store_true',
+                       help='Do not flip DRRs (overrides config setting)')
     
     args = parser.parse_args()
     
@@ -262,13 +266,29 @@ def main():
     
     # Load test dataset
     print(f"\nLoading data from {args.data_dir}")
+    
+    # Get flip setting from config (default to False for backward compatibility)
+    flip_drrs = config.get('data', {}).get('flip_drrs_vertical', False)
+    
+    # Command-line arguments override config
+    if args.flip_drrs_vertical:
+        flip_drrs = True
+    elif args.no_flip_drrs_vertical:
+        flip_drrs = False
+    
+    if flip_drrs:
+        print("✓ DRRs will be vertically flipped to match CT orientation")
+    else:
+        print("✗ DRRs will NOT be flipped (using as-is)")
+    
     test_dataset = PatientDRRDataset(
         data_path=args.data_dir,
         target_volume_size=model.stage_sizes[args.stage],
         target_xray_size=config['xray_config']['img_size'],
         normalize_range=tuple(config['data']['normalize_range']),
         validate_alignment=False,
-        augmentation=False
+        augmentation=False,
+        flip_drrs_vertical=flip_drrs  # Apply same flip as training
     )
     
     print(f"Found {len(test_dataset)} test samples")

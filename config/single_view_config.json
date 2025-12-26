@@ -57,6 +57,12 @@
     "train_split": 0.8,
     "val_split": 0.1,
     "test_split": 0.1,
-    "normalize_range": [-1, 1]
+    "normalize_range": [-1, 1],
+    "target_xray_size": 512,
+    "validate_alignment": true,
+    "augmentation": false,
+    "cache_in_memory": false,
+    "flip_drrs_vertical": true,
+    "_comment": "flip_drrs_vertical: Set to true if your DRRs are vertically flipped relative to CT orientation"
   }
 }
