@@ -25,7 +25,7 @@ from typing import Dict, Optional
 
 try:
     from accelerate import Accelerator
-    from accelerate.utils import set_seed
+    from accelerate.utils import set_seed, DistributedDataParallelKwargs
     ACCELERATE_AVAILABLE = True
 except ImportError:
     print("ERROR: accelerate not installed. Install with: pip install accelerate")
@@ -276,7 +276,7 @@ def main():
         project_dir=args.checkpoint_dir,
         kwargs_handlers=[
             # Enable unused parameters for stage-wise training
-            torch.distributed.DistributedDataParallelKwargs(find_unused_parameters=True)
+            DistributedDataParallelKwargs(find_unused_parameters=True)
         ] if torch.cuda.device_count() > 1 else []
     )
     
