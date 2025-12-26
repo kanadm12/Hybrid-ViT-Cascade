@@ -237,15 +237,22 @@ def train_stage(model,
                     sqrt_one_minus_alphas_cumprod[t][:, None, None, None, None] * noise
                 )
                 
-                # Get X-ray embeddings and conditioning (same as in main forward)
-                xray_features = unwrapped_model.xray_encoder(xrays, t)
-                xray_context = xray_features
-                time_embed = unwrapped_model.time_mlp(t)
-                xray_cond_embed = unwrapped_model.xray_cond_encoder(xrays, t)
-                time_xray_cond = time_embed + xray_cond_embed
+                # Create timestep embeddings (matching main forward)
+                t_normalized = t.float() / unwrapped_model.num_timesteps
+                t_embed = unwrapped_model.time_embed(t_normalized.unsqueeze(-1))
                 
-                # Predict the noise with proper arguments
-                predicted_noise = stage(noisy_volume, xray_features, xray_context, time_xray_cond, prev_stage_volume=None)
+                # Encode X-rays - returns 3 outputs: (xray_context, time_xray_cond, xray_features_2d)
+                xray_context, time_xray_cond, xray_features_2d = unwrapped_model.xray_encoder(xrays, t_embed)
+                
+                # Predict the noise with proper arguments (matching stage forward)
+                predicted_noise = stage(
+                    noisy_volume=noisy_volume,
+                    xray_features=xray_features_2d,
+                    xray_context=xray_features_2d,  # Use 2D features for cross-attention
+                    time_xray_cond=time_xray_cond,
+                    prev_stage_volume=None,
+                    prev_stage_embed=None
+                )
                 
                 # Denoise to get prediction
                 pred_volume = (
