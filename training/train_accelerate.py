@@ -205,39 +205,34 @@ def train_stage(model,
                 val_losses['diffusion'] += loss_dict['diffusion_loss'].item()
                 val_losses['physics'] += loss_dict['physics_loss'].item()
                 
-                # Calculate PSNR and SSIM
-                # Get model prediction (using unwrapped model)
-                unwrapped_model = accelerator.unwrap_model(model)
-                t = torch.zeros((volumes.size(0),), device=volumes.device).long()
-                pred_volume = unwrapped_model.stages[stage_name](
-                    unwrapped_model.stages[stage_name].q_sample(volumes, t, noise=torch.zeros_like(volumes)),
-                    t,
-                    xrays
-                )
-                
-                # PSNR calculation
-                mse = torch.mean((pred_volume - volumes) ** 2)
-                if mse > 0:
-                    psnr = 20 * torch.log10(2.0 / torch.sqrt(mse))  # Assuming normalized range [-1, 1]
-                    val_metrics['psnr'] += psnr.item()
-                
-                # SSIM calculation (simplified version)
-                def ssim_3d(img1, img2):
-                    C1 = (0.01 * 2) ** 2
-                    C2 = (0.03 * 2) ** 2
+                # Calculate PSNR and SSIM from loss dict if available
+                # Use reconstruction from physics loss module
+                if 'reconstructed_volume' in loss_dict:
+                    pred_volume = loss_dict['reconstructed_volume']
                     
-                    mu1 = torch.mean(img1)
-                    mu2 = torch.mean(img2)
-                    sigma1_sq = torch.var(img1)
-                    sigma2_sq = torch.var(img2)
-                    sigma12 = torch.mean((img1 - mu1) * (img2 - mu2))
+                    # PSNR calculation
+                    mse = torch.mean((pred_volume - volumes) ** 2)
+                    if mse > 0:
+                        psnr = 20 * torch.log10(2.0 / torch.sqrt(mse))  # Assuming normalized range [-1, 1]
+                        val_metrics['psnr'] += psnr.item()
                     
-                    ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
-                           ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
-                    return ssim
-                
-                ssim_value = ssim_3d(pred_volume, volumes)
-                val_metrics['ssim'] += ssim_value.item()
+                    # SSIM calculation (simplified version)
+                    def ssim_3d(img1, img2):
+                        C1 = (0.01 * 2) ** 2
+                        C2 = (0.03 * 2) ** 2
+                        
+                        mu1 = torch.mean(img1)
+                        mu2 = torch.mean(img2)
+                        sigma1_sq = torch.var(img1)
+                        sigma2_sq = torch.var(img2)
+                        sigma12 = torch.mean((img1 - mu1) * (img2 - mu2))
+                        
+                        ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+                               ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+                        return ssim
+                    
+                    ssim_value = ssim_3d(pred_volume, volumes)
+                    val_metrics['ssim'] += ssim_value.item()
         
         # Average validation losses and metrics
         num_val_batches = len(val_loader)
