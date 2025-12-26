@@ -57,7 +57,7 @@
   },
   
   "data": {
-    "dataset_path": "workspace/drr_patient_data",
+    "dataset_path": "/workspace/drr_patient_data",
     "train_split": 0.8,
     "val_split": 0.1,
     "test_split": 0.1,
