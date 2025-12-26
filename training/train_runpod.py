@@ -386,7 +386,6 @@ def main():
         num_views=config['xray_config']['num_views'],
         v_parameterization=config['training'].get('v_parameterization', True),
         num_timesteps=config['training'].get('num_timesteps', 1000),
-        extract_features=True  # Enable feature extraction for visualization,
         extract_features=True  # Enable feature extraction for visualization
     ).to(device)
     
