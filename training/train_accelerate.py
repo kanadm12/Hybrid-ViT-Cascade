@@ -186,6 +186,7 @@ def train_stage(model,
         # Validation
         model.eval()
         val_losses = {'total': 0, 'diffusion': 0, 'physics': 0}
+        val_metrics = {'psnr': 0, 'ssim': 0}
         
         with torch.no_grad():
             for batch_data in val_loader:
@@ -203,21 +204,60 @@ def train_stage(model,
                 val_losses['total'] += loss_dict['loss'].item()
                 val_losses['diffusion'] += loss_dict['diffusion_loss'].item()
                 val_losses['physics'] += loss_dict['physics_loss'].item()
+                
+                # Calculate PSNR and SSIM
+                # Get model prediction (using unwrapped model)
+                unwrapped_model = accelerator.unwrap_model(model)
+                t = torch.zeros((volumes.size(0),), device=volumes.device).long()
+                pred_volume = unwrapped_model.stages[stage_name](
+                    unwrapped_model.stages[stage_name].q_sample(volumes, t, noise=torch.zeros_like(volumes)),
+                    t,
+                    xrays
+                )
+                
+                # PSNR calculation
+                mse = torch.mean((pred_volume - volumes) ** 2)
+                if mse > 0:
+                    psnr = 20 * torch.log10(2.0 / torch.sqrt(mse))  # Assuming normalized range [-1, 1]
+                    val_metrics['psnr'] += psnr.item()
+                
+                # SSIM calculation (simplified version)
+                def ssim_3d(img1, img2):
+                    C1 = (0.01 * 2) ** 2
+                    C2 = (0.03 * 2) ** 2
+                    
+                    mu1 = torch.mean(img1)
+                    mu2 = torch.mean(img2)
+                    sigma1_sq = torch.var(img1)
+                    sigma2_sq = torch.var(img2)
+                    sigma12 = torch.mean((img1 - mu1) * (img2 - mu2))
+                    
+                    ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+                           ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+                    return ssim
+                
+                ssim_value = ssim_3d(pred_volume, volumes)
+                val_metrics['ssim'] += ssim_value.item()
         
-        # Average validation losses
+        # Average validation losses and metrics
         num_val_batches = len(val_loader)
         for key in val_losses:
             val_losses[key] /= num_val_batches
+        for key in val_metrics:
+            val_metrics[key] /= num_val_batches
         
-        # Gather validation losses
+        # Gather validation losses and metrics
         val_losses = {k: accelerator.gather(torch.tensor(v).to(accelerator.device)).mean().item() 
                      for k, v in val_losses.items()}
+        val_metrics = {k: accelerator.gather(torch.tensor(v).to(accelerator.device)).mean().item() 
+                      for k, v in val_metrics.items()}
         
         # Logging (main process only)
         if accelerator.is_main_process:
             print(f"\nEpoch {epoch+1}/{num_epochs}:")
             print(f"  Train - Total: {train_losses['total']:.6f}, Diff: {train_losses['diffusion']:.6f}, Phys: {train_losses['physics']:.6f}")
             print(f"  Val   - Total: {val_losses['total']:.6f}, Diff: {val_losses['diffusion']:.6f}, Phys: {val_losses['physics']:.6f}")
+            print(f"  Metrics - PSNR: {val_metrics['psnr']:.2f} dB, SSIM: {val_metrics['ssim']:.4f}")
             
             if use_wandb and WANDB_AVAILABLE:
                 wandb.log({
@@ -227,6 +267,8 @@ def train_stage(model,
                     f'{stage_name}/val_loss': val_losses['total'],
                     f'{stage_name}/val_diffusion': val_losses['diffusion'],
                     f'{stage_name}/val_physics': val_losses['physics'],
+                    f'{stage_name}/psnr': val_metrics['psnr'],
+                    f'{stage_name}/ssim': val_metrics['ssim'],
                     'epoch': epoch,
                     'learning_rate': optimizer.param_groups[0]['lr']
                 })
