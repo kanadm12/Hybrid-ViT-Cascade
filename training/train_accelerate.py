@@ -281,8 +281,7 @@ def train_stage(model,
         
         # Gather validation losses
         val_losses = {k: accelerator.gather(torch.tensor(v).to(accelerator.device)).mean().item() 
-                     for k, v in val_losses.items()} 
-                      for k, v in val_metrics.items()}
+                     for k, v in val_losses.items()}
         
         # Logging (main process only)
         if accelerator.is_main_process:
