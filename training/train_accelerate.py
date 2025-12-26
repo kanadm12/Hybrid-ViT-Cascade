@@ -113,8 +113,11 @@ def train_stage(model,
     
     best_val_loss = float('inf')
     
+    # Get unwrapped model for accessing attributes
+    unwrapped_model = accelerator.unwrap_model(model)
+    
     # Freeze all stages except current
-    for name, stage in model.stages.items():
+    for name, stage in unwrapped_model.stages.items():
         if name == stage_name:
             for param in stage.parameters():
                 param.requires_grad = True
