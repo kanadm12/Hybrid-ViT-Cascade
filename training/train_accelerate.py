@@ -254,7 +254,12 @@ def train_stage(model,
                     
                     # DDIM step (simplified - using v-prediction)
                     alpha_t = unwrapped_model.alphas_cumprod[t_batch][:, None, None, None, None]
-                    alpha_prev = unwrapped_model.alphas_cumprod[timesteps[i+1]][:, None, None, None, None] if i < len(timesteps) - 1 else torch.ones_like(alpha_t)
+                    
+                    if i < len(timesteps) - 1:
+                        t_prev = torch.full((volumes.size(0),), timesteps[i+1], device=volumes.device, dtype=torch.long)
+                        alpha_prev = unwrapped_model.alphas_cumprod[t_prev][:, None, None, None, None]
+                    else:
+                        alpha_prev = torch.ones_like(alpha_t)
                     
                     # Convert v-prediction to x0 prediction
                     sqrt_alpha_t = torch.sqrt(alpha_t)
