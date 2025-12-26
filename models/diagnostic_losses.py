@@ -6,7 +6,7 @@ Each loss isolates a specific architectural component for debugging/ablation
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 import sys
 from pathlib import Path
 
