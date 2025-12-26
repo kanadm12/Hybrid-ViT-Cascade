@@ -231,6 +231,49 @@ def train_stage(model,
                     'learning_rate': optimizer.param_groups[0]['lr']
                 })
             
+            # Visualize features every 5 epochs
+            if (epoch + 1) % 5 == 0:
+                try:
+                    from utils.visualization import plot_feature_maps
+                    import matplotlib
+                    matplotlib.use('Agg')  # Non-interactive backend
+                    
+                    # Get unwrapped model
+                    unwrapped_model = accelerator.unwrap_model(model)
+                    
+                    # Get a validation batch
+                    val_batch = next(iter(val_loader))
+                    if isinstance(val_batch, dict):
+                        sample_volume = val_batch['ct_volume'][:1].to(accelerator.device)
+                        sample_xrays = val_batch['drr_stacked'][:1].to(accelerator.device)
+                    else:
+                        sample_volume, sample_xrays = val_batch
+                        sample_volume = sample_volume[:1].to(accelerator.device)
+                        sample_xrays = sample_xrays[:1].to(accelerator.device)
+                    
+                    # Run inference to get features
+                    with torch.no_grad():
+                        _ = unwrapped_model(sample_volume, sample_xrays, stage_name, None)
+                        
+                        if hasattr(unwrapped_model, 'last_features') and unwrapped_model.last_features:
+                            features_dir = checkpoint_dir / 'features'
+                            features_dir.mkdir(exist_ok=True)
+                            
+                            plot_feature_maps(
+                                unwrapped_model.last_features,
+                                save_path=features_dir / f'{stage_name}_epoch_{epoch+1}.png'
+                            )
+                            print(f"  Saved feature maps to {features_dir / f'{stage_name}_epoch_{epoch+1}.png'}")
+                            
+                            # Log to wandb if available
+                            if use_wandb and WANDB_AVAILABLE:
+                                import wandb as wandb_module
+                                wandb_module.log({
+                                    f'{stage_name}/features': wandb_module.Image(str(features_dir / f'{stage_name}_epoch_{epoch+1}.png'))
+                                })
+                except Exception as e:
+                    print(f"  Warning: Could not save feature maps: {e}")
+            
             # Save checkpoint if best
             if val_losses['total'] < best_val_loss:
                 best_val_loss = val_losses['total']
@@ -317,7 +360,7 @@ def main():
         share_view_weights=config['xray_config'].get('share_view_weights', False),
         v_parameterization=config['training'].get('v_parameterization', True),
         num_timesteps=config['training'].get('num_timesteps', 1000),
-        extract_features=False  # Disable for distributed training
+        extract_features=True  # Enable for feature visualization
     )
     
     if accelerator.is_main_process:
