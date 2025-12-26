@@ -256,20 +256,21 @@ def train_stage(model,
                         _ = unwrapped_model(sample_volume, sample_xrays, stage_name, None)
                         
                         if hasattr(unwrapped_model, 'last_features') and unwrapped_model.last_features:
-                            features_dir = checkpoint_dir / 'features'
-                            features_dir.mkdir(exist_ok=True)
+                            # Save to workspace/feature_maps instead of checkpoint dir
+                            features_dir = Path('/workspace/feature_maps') / stage_name
+                            features_dir.mkdir(parents=True, exist_ok=True)
                             
                             plot_feature_maps(
                                 unwrapped_model.last_features,
-                                save_path=features_dir / f'{stage_name}_epoch_{epoch+1}.png'
+                                save_path=features_dir / f'epoch_{epoch+1}.png'
                             )
-                            print(f"  Saved feature maps to {features_dir / f'{stage_name}_epoch_{epoch+1}.png'}")
+                            print(f"  Saved feature maps to {features_dir / f'epoch_{epoch+1}.png'}")
                             
                             # Log to wandb if available
                             if use_wandb and WANDB_AVAILABLE:
                                 import wandb as wandb_module
                                 wandb_module.log({
-                                    f'{stage_name}/features': wandb_module.Image(str(features_dir / f'{stage_name}_epoch_{epoch+1}.png'))
+                                    f'{stage_name}/features': wandb_module.Image(str(features_dir / f'epoch_{epoch+1}.png'))
                                 })
                 except Exception as e:
                     print(f"  Warning: Could not save feature maps: {e}")
