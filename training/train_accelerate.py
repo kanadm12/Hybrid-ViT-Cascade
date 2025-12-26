@@ -14,6 +14,7 @@ For quick setup with 4 GPUs:
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed
 from torch.utils.data import DataLoader
 import json
 import argparse
@@ -272,7 +273,11 @@ def main():
         gradient_accumulation_steps=1,
         mixed_precision='fp16',  # Use mixed precision for A100s
         log_with='wandb' if (args.wandb and WANDB_AVAILABLE) else None,
-        project_dir=args.checkpoint_dir
+        project_dir=args.checkpoint_dir,
+        kwargs_handlers=[
+            # Enable unused parameters for stage-wise training
+            torch.distributed.DistributedDataParallelKwargs(find_unused_parameters=True)
+        ] if torch.cuda.device_count() > 1 else []
     )
     
     # Set seed for reproducibility
