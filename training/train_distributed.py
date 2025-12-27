@@ -159,7 +159,8 @@ def train_stage(model: DDP,
                 rank: int,
                 world_size: int,
                 use_wandb: bool = False,
-                tb_writer = None):
+                tb_writer = None,
+                save_all_checkpoints: bool = False):
     """Train a single stage with distributed training"""
     
     is_main_process = (rank == 0)
@@ -445,6 +446,18 @@ def train_stage(model: DDP,
                 }, checkpoint_path)
                 print(f"  Saved best checkpoint: {checkpoint_path}")
             
+            # Save checkpoint every epoch if requested
+            if save_all_checkpoints:
+                checkpoint_path = checkpoint_dir / f"{stage_name}_epoch_{epoch:03d}.pt"
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.module.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_losses['total'],
+                    'stage_name': stage_name
+                }, checkpoint_path)
+                print(f"  Saved best checkpoint: {checkpoint_path}")
+            
             # Visualize features every 5 epochs
             if (epoch + 1) % 5 == 0:
                 try:
@@ -487,6 +500,8 @@ def main():
     parser.add_argument('--config', type=str, required=True, help='Path to config JSON')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
     parser.add_argument('--resume_from', type=str, default=None, help='Resume from checkpoint')
+    parser.add_argument('--start_stage', type=int, default=None, help='Start from specific stage (0=stage1, 1=stage2, 2=stage3)')
+    parser.add_argument('--save_all_checkpoints', action='store_true', help='Save checkpoint every epoch (not just best)')
     parser.add_argument('--tensorboard', action='store_true', help='Use TensorBoard logging')
     parser.add_argument('--log_dir', type=str, default='runs', help='TensorBoard log directory')
     parser.add_argument('--wandb', action='store_true', help='Use Weights & Biases logging')
@@ -550,7 +565,7 @@ def main():
                     find_unused_parameters=False, broadcast_buffers=False)
     
     # Resume from checkpoint if specified
-    start_stage_idx = 0
+    start_stage_idx = args.start_stage if args.start_stage is not None else 0
     if args.resume_from and is_main_process:
         print(f"\nLoading checkpoint from {args.resume_from}")
         checkpoint = torch.load(args.resume_from, map_location=device, weights_only=False)
@@ -562,6 +577,9 @@ def main():
         print(f"  Stage: {checkpoint.get('stage_name', 'unknown')}")
         print(f"  Val loss: {checkpoint.get('val_loss', 'unknown')}")
         print(f"  Note: strict=False allows missing keys (e.g., feature_extractor)")
+    
+    if args.start_stage is not None and is_main_process:
+        print(f"\nStarting from stage {args.start_stage + 1} (stage{args.start_stage + 1})")
         
         # Find which stage to start from
         resumed_stage = checkpoint.get('stage_name', 'stage1')
@@ -642,7 +660,8 @@ def main():
             rank=rank,
             world_size=world_size,
             use_wandb=(args.wandb and is_main_process),
-            tb_writer=writer
+            tb_writer=writer,
+            save_all_checkpoints=args.save_all_checkpoints
         )
     
     # Cleanup
