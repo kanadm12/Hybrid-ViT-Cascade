@@ -523,14 +523,15 @@ def main():
     start_stage_idx = 0
     if args.resume_from and is_main_process:
         print(f"\nLoading checkpoint from {args.resume_from}")
-        checkpoint = torch.load(args.resume_from, map_location=device)
+        checkpoint = torch.load(args.resume_from, map_location=device, weights_only=False)
         if is_distributed:
-            model.module.load_state_dict(checkpoint['model_state_dict'])
+            model.module.load_state_dict(checkpoint['model_state_dict'], strict=False)
         else:
-            model.load_state_dict(checkpoint['model_state_dict'])
+            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         print(f"  Resumed from epoch {checkpoint.get('epoch', 'unknown')}")
         print(f"  Stage: {checkpoint.get('stage_name', 'unknown')}")
         print(f"  Val loss: {checkpoint.get('val_loss', 'unknown')}")
+        print(f"  Note: strict=False allows missing keys (e.g., feature_extractor)")
         
         # Find which stage to start from
         resumed_stage = checkpoint.get('stage_name', 'stage1')
