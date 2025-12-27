@@ -539,7 +539,7 @@ def main():
             config=config,
             stage_config=stage_config,
             batch_size=batch_size,
-            num_workers=4,  # Reduced: 4 workers total is enough for multi-GPU
+            num_workers=2,  # 2 workers per GPU = 8 total workers (reasonable)
             is_distributed=is_distributed,
             rank=rank
         )
