@@ -580,8 +580,9 @@ def main():
     
     if args.start_stage is not None and is_main_process:
         print(f"\nStarting from stage {args.start_stage + 1} (stage{args.start_stage + 1})")
-        
-        # Find which stage to start from
+    elif args.resume_from and is_main_process:
+        # If no explicit start_stage, detect from checkpoint
+        checkpoint = torch.load(args.resume_from, map_location=device, weights_only=False)
         resumed_stage = checkpoint.get('stage_name', 'stage1')
         for idx, stage_config in enumerate(config['stage_configs']):
             if stage_config['name'] == resumed_stage:
