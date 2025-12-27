@@ -350,6 +350,9 @@ def train_stage(model: DDP,
                         del model_output, xray_context, time_xray_cond, xray_features_2d, t_embed
                         torch.cuda.empty_cache()
                 
+                # Clamp predictions to valid range [-1, 1]
+                pred_volume = torch.clamp(pred_volume, -1.0, 1.0)
+                
                 # PSNR calculation
                 mse = torch.mean((pred_volume - volumes) ** 2)
                 if mse > 0:
