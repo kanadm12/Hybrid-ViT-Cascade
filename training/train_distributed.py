@@ -524,7 +524,13 @@ def main():
             dist.barrier()
         
         # Create dataloaders
-        batch_size = config['training'].get('batch_size', 4) // world_size  # Divide batch size by world size
+        # Batch size per GPU - ensure at least 1
+        batch_size_total = config['training'].get('batch_size', 4)
+        batch_size = max(1, batch_size_total // world_size)  # At least 1 per GPU
+        
+        if is_main_process:
+            print(f"Batch size: {batch_size} per GPU ({batch_size * world_size} total effective)")
+        
         train_loader, val_loader, train_sampler = create_dataloaders(
             config=config,
             stage_config=stage_config,
