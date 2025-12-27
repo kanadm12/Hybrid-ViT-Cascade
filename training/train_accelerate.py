@@ -206,8 +206,8 @@ def train_stage(model,
                 val_losses['physics'] += loss_dict['physics_loss'].item()
         
         # Calculate PSNR and SSIM on first validation sample only (memory-efficient: process one at a time)
-        # Only calculate every 5 epochs to save memory and time
-        if accelerator.is_main_process and (epoch + 1) % 5 == 0:
+        # Calculate every epoch to monitor training progress
+        if accelerator.is_main_process:
             try:
                 # Clear cache before metrics calculation
                 torch.cuda.empty_cache()

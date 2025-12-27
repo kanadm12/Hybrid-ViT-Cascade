@@ -271,11 +271,117 @@ def train_stage(model: DDP,
                 dist.all_reduce(tensor, op=dist.ReduceOp.AVG)
                 val_losses[key] = tensor.item()
         
+        # Calculate PSNR and SSIM every epoch (main process only)
+        val_metrics = {'psnr': 0, 'ssim': 0}
+        if is_main_process:
+            try:
+                torch.cuda.empty_cache()
+                
+                # Get one batch for metrics
+                val_iter = iter(val_loader)
+                batch_data = next(val_iter)
+                
+                if isinstance(batch_data, dict):
+                    volumes = batch_data['ct_volume']
+                    xrays = batch_data['drr_stacked']
+                else:
+                    volumes, xrays = batch_data
+                
+                # Process only FIRST sample to save memory
+                volumes = volumes[0:1].to(device)
+                xrays = xrays[0:1].to(device)
+                
+                stage = model.module.stages[stage_name]
+                
+                # Do lightweight DDIM sampling (10 steps to save memory)
+                num_inference_steps = 10
+                timesteps = torch.linspace(model.module.num_timesteps - 1, 0, num_inference_steps).long().to(device)
+                
+                # Start from pure noise
+                pred_volume = torch.randn_like(volumes)
+                
+                # DDIM denoising loop
+                with torch.no_grad():
+                    for i, t in enumerate(timesteps):
+                        t_batch = torch.full((1,), t, device=device, dtype=torch.long)
+                        
+                        # Create timestep embeddings
+                        t_normalized = t_batch.float() / model.module.num_timesteps
+                        t_embed = model.module.time_embed(t_normalized.unsqueeze(-1))
+                        
+                        # Encode X-rays
+                        xray_context, time_xray_cond, xray_features_2d = model.module.xray_encoder(xrays, t_embed)
+                        
+                        # Predict noise/velocity
+                        model_output = stage(
+                            noisy_volume=pred_volume,
+                            xray_features=xray_features_2d,
+                            xray_context=xray_features_2d,
+                            time_xray_cond=time_xray_cond,
+                            prev_stage_volume=None,
+                            prev_stage_embed=None
+                        )
+                        
+                        # DDIM step
+                        alpha_t = model.module.alphas_cumprod[t_batch][:, None, None, None, None]
+                        
+                        if i < len(timesteps) - 1:
+                            t_prev = torch.full((1,), timesteps[i+1], device=device, dtype=torch.long)
+                            alpha_prev = model.module.alphas_cumprod[t_prev][:, None, None, None, None]
+                        else:
+                            alpha_prev = torch.ones_like(alpha_t)
+                        
+                        # Convert v-prediction to x0 prediction
+                        sqrt_alpha_t = torch.sqrt(alpha_t)
+                        sqrt_one_minus_alpha_t = torch.sqrt(1 - alpha_t)
+                        
+                        pred_x0 = sqrt_alpha_t * pred_volume - sqrt_one_minus_alpha_t * model_output
+                        
+                        # DDIM update
+                        if i < len(timesteps) - 1:
+                            pred_volume = torch.sqrt(alpha_prev) * pred_x0 + torch.sqrt(1 - alpha_prev) * model_output
+                        else:
+                            pred_volume = pred_x0
+                        
+                        # Clean up
+                        del model_output, xray_context, time_xray_cond, xray_features_2d, t_embed
+                        torch.cuda.empty_cache()
+                
+                # PSNR calculation
+                mse = torch.mean((pred_volume - volumes) ** 2)
+                if mse > 0:
+                    psnr = 20 * torch.log10(2.0 / torch.sqrt(mse))
+                    val_metrics['psnr'] = psnr.item()
+                
+                # SSIM calculation
+                C1 = (0.01 * 2) ** 2
+                C2 = (0.03 * 2) ** 2
+                
+                mu1 = torch.mean(pred_volume)
+                mu2 = torch.mean(volumes)
+                sigma1_sq = torch.var(pred_volume)
+                sigma2_sq = torch.var(volumes)
+                sigma12 = torch.mean((pred_volume - mu1) * (volumes - mu2))
+                
+                ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+                       ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+                val_metrics['ssim'] = ssim.item()
+                
+                # Clean up
+                del pred_volume, volumes, xrays
+                torch.cuda.empty_cache()
+                
+            except Exception as e:
+                print(f"[WARNING] Failed to calculate PSNR/SSIM: {e}")
+                val_metrics['psnr'] = 0.0
+                val_metrics['ssim'] = 0.0
+        
         # Logging (main process only)
         if is_main_process:
             print(f"\nEpoch {epoch+1}/{num_epochs}:")
             print(f"  Train - Total: {train_losses['total']:.6f}, Diff: {train_losses['diffusion']:.6f}, Phys: {train_losses['physics']:.6f}")
             print(f"  Val   - Total: {val_losses['total']:.6f}, Diff: {val_losses['diffusion']:.6f}, Phys: {val_losses['physics']:.6f}")
+            print(f"  Metrics - PSNR: {val_metrics['psnr']:.2f} dB, SSIM: {val_metrics['ssim']:.4f}")
             
             if use_wandb:
                 wandb.log({
@@ -285,6 +391,8 @@ def train_stage(model: DDP,
                     f'{stage_name}/val_loss': val_losses['total'],
                     f'{stage_name}/val_diffusion': val_losses['diffusion'],
                     f'{stage_name}/val_physics': val_losses['physics'],
+                    f'{stage_name}/psnr': val_metrics['psnr'],
+                    f'{stage_name}/ssim': val_metrics['ssim'],
                     'epoch': epoch,
                     'learning_rate': optimizer.param_groups[0]['lr']
                 })
@@ -301,6 +409,31 @@ def train_stage(model: DDP,
                     'stage_name': stage_name
                 }, checkpoint_path)
                 print(f"  Saved best checkpoint: {checkpoint_path}")
+            
+            # Visualize features every 5 epochs
+            if (epoch + 1) % 5 == 0:
+                try:
+                    import matplotlib
+                    matplotlib.use('Agg')  # Non-interactive backend
+                    
+                    # Get a validation batch for visualization
+                    val_batch = next(iter(val_loader))
+                    
+                    viz_dir = checkpoint_dir / "visualizations"
+                    viz_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    viz_figs = visualize_epoch_features(
+                        model=model.module,
+                        val_batch=val_batch,
+                        epoch=epoch,
+                        stage_name=stage_name,
+                        save_dir=viz_dir,
+                        device=device,
+                        wandb_log=use_wandb
+                    )
+                    print(f"  Feature maps saved to {viz_dir / f'epoch_{epoch:03d}'}")
+                except Exception as e:
+                    print(f"  Warning: Feature visualization failed: {e}")
         
         # Step scheduler
         if scheduler is not None:
