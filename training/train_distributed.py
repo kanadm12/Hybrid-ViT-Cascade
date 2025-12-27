@@ -107,7 +107,7 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
         train_sampler = None
         val_sampler = None
     
-    # Create dataloaders
+    # Create dataloaders with optimizations for multi-GPU
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -115,7 +115,9 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=True,
-        drop_last=True
+        drop_last=True,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
     )
     
     val_loader = DataLoader(
@@ -125,7 +127,9 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=True,
-        drop_last=False
+        drop_last=False,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
     )
     
     # Print alignment report on main process
@@ -535,7 +539,7 @@ def main():
             config=config,
             stage_config=stage_config,
             batch_size=batch_size,
-            num_workers=4,
+            num_workers=8,  # Increased for better multi-GPU performance
             is_distributed=is_distributed,
             rank=rank
         )
