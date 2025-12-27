@@ -272,7 +272,7 @@ def train_stage(model: DDP,
                 val_losses[key] = tensor.item()
         
         # Calculate PSNR and SSIM every epoch (main process only)
-        val_metrics = {'psnr': 0, 'ssim': 0}
+        val_metrics = {'psnr': 0, 'ssim': 0, 'lpips': 0}
         if is_main_process:
             try:
                 torch.cuda.empty_cache()
@@ -367,6 +367,19 @@ def train_stage(model: DDP,
                        ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
                 val_metrics['ssim'] = ssim.item()
                 
+                # LPIPS calculation (if available)
+                try:
+                    from models.feature_metrics import LPIPS3D, LPIPS_AVAILABLE
+                    if LPIPS_AVAILABLE:
+                        lpips_model = LPIPS3D(net='alex').to(device)
+                        lpips_model.eval()
+                        lpips_score = lpips_model(pred_volume, volumes)
+                        val_metrics['lpips'] = lpips_score.item()
+                        del lpips_model
+                except Exception as lpips_error:
+                    print(f"  [INFO] LPIPS not available: {lpips_error}")
+                    val_metrics['lpips'] = 0.0
+                
                 # Clean up
                 del pred_volume, volumes, xrays
                 torch.cuda.empty_cache()
@@ -375,13 +388,14 @@ def train_stage(model: DDP,
                 print(f"[WARNING] Failed to calculate PSNR/SSIM: {e}")
                 val_metrics['psnr'] = 0.0
                 val_metrics['ssim'] = 0.0
+                val_metrics['lpips'] = 0.0
         
         # Logging (main process only)
         if is_main_process:
             print(f"\nEpoch {epoch+1}/{num_epochs}:")
             print(f"  Train - Total: {train_losses['total']:.6f}, Diff: {train_losses['diffusion']:.6f}, Phys: {train_losses['physics']:.6f}")
             print(f"  Val   - Total: {val_losses['total']:.6f}, Diff: {val_losses['diffusion']:.6f}, Phys: {val_losses['physics']:.6f}")
-            print(f"  Metrics - PSNR: {val_metrics['psnr']:.2f} dB, SSIM: {val_metrics['ssim']:.4f}")
+            print(f"  Metrics - PSNR: {val_metrics['psnr']:.2f} dB, SSIM: {val_metrics['ssim']:.4f}, LPIPS: {val_metrics['lpips']:.4f}")
             
             if use_wandb:
                 wandb.log({
@@ -393,6 +407,7 @@ def train_stage(model: DDP,
                     f'{stage_name}/val_physics': val_losses['physics'],
                     f'{stage_name}/psnr': val_metrics['psnr'],
                     f'{stage_name}/ssim': val_metrics['ssim'],
+                    f'{stage_name}/lpips': val_metrics['lpips'],
                     'epoch': epoch,
                     'learning_rate': optimizer.param_groups[0]['lr']
                 })
