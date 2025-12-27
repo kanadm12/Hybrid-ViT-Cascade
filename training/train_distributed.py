@@ -596,10 +596,12 @@ def main():
     
     # Progressive training (start from resumed stage if applicable)
     for stage_idx, stage_config in enumerate(config['stage_configs']):
-        if stage_idx < start_stage_idx:
-            continue  # Skip already trained stages
-        
         stage_name = stage_config['name']
+        
+        if stage_idx < start_stage_idx:
+            if is_main_process:
+                print(f"\nSkipping {stage_name} (already trained)")
+            continue  # Skip already trained stages
         
         if is_main_process:
             print(f"\n{'='*60}")
