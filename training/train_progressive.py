@@ -124,10 +124,10 @@ def train_stage(model: UnifiedHybridViTCascade,
         prev_stage_model: Previous stage model (if cascading)
         use_wandb: Whether to log to Weights & Biases
         visualize_features: Whether to visualize feature maps after each epoch
-        viz_dir: Directory to save visualizations (defaults to checkpoint_dir/visualizations)
+        viz_dir: Directory to save visualizations (defaults to /workspace/feature_maps)
     """
     if viz_dir is None:
-        viz_dir = checkpoint_dir / "visualizations"
+        viz_dir = Path('/workspace/feature_maps') / stage_name
     viz_dir.mkdir(parents=True, exist_ok=True)
     
     best_val_loss = float('inf')

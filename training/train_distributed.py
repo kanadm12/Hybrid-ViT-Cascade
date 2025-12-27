@@ -419,7 +419,8 @@ def train_stage(model: DDP,
                     # Get a validation batch for visualization
                     val_batch = next(iter(val_loader))
                     
-                    viz_dir = checkpoint_dir / "visualizations"
+                    # Save to workspace directory
+                    viz_dir = Path('/workspace/feature_maps') / stage_name
                     viz_dir.mkdir(parents=True, exist_ok=True)
                     
                     viz_figs = visualize_epoch_features(

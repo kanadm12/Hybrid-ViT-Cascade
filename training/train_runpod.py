@@ -114,7 +114,7 @@ def train_stage_with_amp(
     
     # Setup visualization directory
     if viz_dir is None:
-        viz_dir = checkpoint_dir / "visualizations"
+        viz_dir = Path('/workspace/feature_maps') / stage_name
     viz_dir.mkdir(parents=True, exist_ok=True)
     
     # Get a validation batch for feature visualization
