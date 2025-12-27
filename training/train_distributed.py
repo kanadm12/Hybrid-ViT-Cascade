@@ -17,6 +17,7 @@ import torch.optim as optim
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.tensorboard import SummaryWriter
 import json
 import argparse
 from pathlib import Path
@@ -156,7 +157,8 @@ def train_stage(model: DDP,
                 checkpoint_dir: Path,
                 rank: int,
                 world_size: int,
-                use_wandb: bool = False):
+                use_wandb: bool = False,
+                tb_writer = None):
     """Train a single stage with distributed training"""
     
     is_main_process = (rank == 0)
@@ -397,6 +399,20 @@ def train_stage(model: DDP,
             print(f"  Val   - Total: {val_losses['total']:.6f}, Diff: {val_losses['diffusion']:.6f}, Phys: {val_losses['physics']:.6f}")
             print(f"  Metrics - PSNR: {val_metrics['psnr']:.2f} dB, SSIM: {val_metrics['ssim']:.4f}, LPIPS: {val_metrics['lpips']:.4f}")
             
+            # Log to TensorBoard
+            if tb_writer is not None:
+                global_step = stage_idx * num_epochs + epoch
+                tb_writer.add_scalar(f'{stage_name}/train_loss', train_losses['total'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/train_diffusion', train_losses['diffusion'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/train_physics', train_losses['physics'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/val_loss', val_losses['total'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/val_diffusion', val_losses['diffusion'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/val_physics', val_losses['physics'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/psnr', val_metrics['psnr'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/ssim', val_metrics['ssim'], global_step)
+                tb_writer.add_scalar(f'{stage_name}/lpips', val_metrics['lpips'], global_step)
+                tb_writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], global_step)
+            
             if use_wandb:
                 wandb.log({
                     f'{stage_name}/train_loss': train_losses['total'],
@@ -467,6 +483,8 @@ def main():
     parser.add_argument('--config', type=str, required=True, help='Path to config JSON')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
     parser.add_argument('--resume_from', type=str, default=None, help='Resume from checkpoint')
+    parser.add_argument('--tensorboard', action='store_true', help='Use TensorBoard logging')
+    parser.add_argument('--log_dir', type=str, default='runs', help='TensorBoard log directory')
     parser.add_argument('--wandb', action='store_true', help='Use Weights & Biases logging')
     parser.add_argument('--wandb_project', type=str, default='hybrid-vit-cascade', help='W&B project name')
     args = parser.parse_args()
@@ -486,6 +504,14 @@ def main():
     
     # Load config
     config = load_config(args.config)
+    
+    # Initialize TensorBoard (main process only)
+    writer = None
+    if args.tensorboard and is_main_process:
+        log_dir = Path(args.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        writer = SummaryWriter(log_dir=str(log_dir))
+        print(f"TensorBoard logging to: {log_dir}")
     
     # Initialize W&B (main process only)
     if args.wandb and is_main_process:
@@ -610,10 +636,13 @@ def main():
             checkpoint_dir=checkpoint_dir,
             rank=rank,
             world_size=world_size,
-            use_wandb=(args.wandb and is_main_process)
+            use_wandb=(args.wandb and is_main_process),
+            tb_writer=writer
         )
     
     # Cleanup
+    if writer is not None:
+        writer.close()
     if is_main_process and args.wandb:
         wandb.finish()
     
