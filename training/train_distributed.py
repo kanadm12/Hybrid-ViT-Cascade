@@ -107,7 +107,7 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
         train_sampler = None
         val_sampler = None
     
-    # Create dataloaders with optimizations for multi-GPU
+    # Create dataloaders - no persistent workers to avoid serialization
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -115,9 +115,7 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=True,
-        drop_last=True,
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None
+        drop_last=True
     )
     
     val_loader = DataLoader(
@@ -127,9 +125,7 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=True,
-        drop_last=False,
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None
+        drop_last=False
     )
     
     # Print alignment report on main process
@@ -503,9 +499,10 @@ def main():
         extract_features=False  # Disable for distributed training to save memory
     ).to(device)
     
-    # Wrap model with DDP
+    # Wrap model with DDP (find_unused_parameters=False for better performance)
     if is_distributed:
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank, 
+                    find_unused_parameters=False, broadcast_buffers=False)
     
     if is_main_process:
         total_params = sum(p.numel() for p in model.parameters())
