@@ -160,7 +160,7 @@ def train_stage(model: DDP,
                 world_size: int,
                 use_wandb: bool = False,
                 tb_writer = None):
-    """Train a single stage with distributed training""
+    """Train a single stage with distributed training"""
     
     is_main_process = (rank == 0)
     best_val_loss = float('inf')
