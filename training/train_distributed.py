@@ -147,6 +147,7 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
 
 def train_stage(model: DDP,
                 stage_name: str,
+                stage_idx: int,
                 train_loader: DataLoader,
                 val_loader: DataLoader,
                 train_sampler: Optional[DistributedSampler],
@@ -159,7 +160,7 @@ def train_stage(model: DDP,
                 world_size: int,
                 use_wandb: bool = False,
                 tb_writer = None):
-    """Train a single stage with distributed training"""
+    """Train a single stage with distributed training""
     
     is_main_process = (rank == 0)
     best_val_loss = float('inf')
@@ -626,6 +627,7 @@ def main():
         model = train_stage(
             model=model,
             stage_name=stage_name,
+            stage_idx=stage_idx,
             train_loader=train_loader,
             val_loader=val_loader,
             train_sampler=train_sampler,
