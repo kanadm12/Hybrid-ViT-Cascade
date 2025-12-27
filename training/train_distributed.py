@@ -496,7 +496,7 @@ def main():
         share_view_weights=config['xray_config'].get('share_view_weights', False),
         v_parameterization=config['training'].get('v_parameterization', True),
         num_timesteps=config['training'].get('num_timesteps', 1000),
-        extract_features=False  # Disable for distributed training to save memory
+        extract_features=True  # Enable for feature visualization
     ).to(device)
     
     # Wrap model with DDP (find_unused_parameters=False for better performance)
@@ -504,14 +504,37 @@ def main():
         model = DDP(model, device_ids=[local_rank], output_device=local_rank, 
                     find_unused_parameters=False, broadcast_buffers=False)
     
+    # Resume from checkpoint if specified
+    start_stage_idx = 0
+    if args.resume_from and is_main_process:
+        print(f"\nLoading checkpoint from {args.resume_from}")
+        checkpoint = torch.load(args.resume_from, map_location=device)
+        if is_distributed:
+            model.module.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"  Resumed from epoch {checkpoint.get('epoch', 'unknown')}")
+        print(f"  Stage: {checkpoint.get('stage_name', 'unknown')}")
+        print(f"  Val loss: {checkpoint.get('val_loss', 'unknown')}")
+        
+        # Find which stage to start from
+        resumed_stage = checkpoint.get('stage_name', 'stage1')
+        for idx, stage_config in enumerate(config['stage_configs']):
+            if stage_config['name'] == resumed_stage:
+                start_stage_idx = idx
+                break
+    
     if is_main_process:
         total_params = sum(p.numel() for p in model.parameters())
         print(f"\nModel created with {len(config['stage_configs'])} stages")
         print(f"Total parameters: {total_params:,}")
         print(f"Memory per GPU: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
     
-    # Progressive training
+    # Progressive training (start from resumed stage if applicable)
     for stage_idx, stage_config in enumerate(config['stage_configs']):
+        if stage_idx < start_stage_idx:
+            continue  # Skip already trained stages
+        
         stage_name = stage_config['name']
         
         if is_main_process:
