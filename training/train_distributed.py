@@ -445,21 +445,8 @@ def train_stage(model: DDP,
                     'stage_name': stage_name
                 }, checkpoint_path)
                 print(f"  Saved best checkpoint: {checkpoint_path}")
-            
-            # Save checkpoint every epoch if requested
-            if save_all_checkpoints:
-                checkpoint_path = checkpoint_dir / f"{stage_name}_epoch_{epoch:03d}.pt"
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model.module.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'val_loss': val_losses['total'],
-                    'stage_name': stage_name
-                }, checkpoint_path)
-                print(f"  Saved best checkpoint: {checkpoint_path}")
-            
-            # Visualize features every 5 epochs
-            if (epoch + 1) % 5 == 0:
+                
+                # Visualize features when best model is saved
                 try:
                     import matplotlib
                     matplotlib.use('Agg')  # Non-interactive backend
@@ -483,6 +470,18 @@ def train_stage(model: DDP,
                     print(f"  Feature maps saved to {viz_dir / f'epoch_{epoch:03d}'}")
                 except Exception as e:
                     print(f"  Warning: Feature visualization failed: {e}")
+            
+            # Save checkpoint every epoch if requested
+            if save_all_checkpoints:
+                checkpoint_path = checkpoint_dir / f"{stage_name}_epoch_{epoch:03d}.pt"
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.module.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_losses['total'],
+                    'stage_name': stage_name
+                }, checkpoint_path)
+                print(f"  Saved best checkpoint: {checkpoint_path}")
         
         # Step scheduler
         if scheduler is not None:
