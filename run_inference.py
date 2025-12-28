@@ -9,6 +9,47 @@ from inference import load_model, reconstruct_volume
 from utils.dataset import PatientDRRDataset
 import nibabel as nib
 import numpy as np
+import matplotlib.pyplot as plt
+
+def save_orthogonal_views(volume, output_path, title="CT Volume"):
+    """
+    Save orthogonal views (axial, coronal, sagittal) of a 3D volume
+    
+    Args:
+        volume: 3D numpy array (D, H, W)
+        output_path: Path to save the figure
+        title: Title for the figure
+    """
+    D, H, W = volume.shape
+    
+    # Get middle slices
+    axial_slice = volume[D//2, :, :]        # XY plane (top view)
+    coronal_slice = volume[:, H//2, :]      # XZ plane (front view)
+    sagittal_slice = volume[:, :, W//2]     # YZ plane (side view)
+    
+    # Create figure with 3 subplots
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # Axial view (XY plane)
+    axes[0].imshow(axial_slice, cmap='gray', origin='lower')
+    axes[0].set_title(f'{title}\nAxial View (XY plane)')
+    axes[0].axis('off')
+    
+    # Coronal view (XZ plane)
+    axes[1].imshow(coronal_slice, cmap='gray', origin='lower')
+    axes[1].set_title(f'{title}\nCoronal View (XZ plane)')
+    axes[1].axis('off')
+    
+    # Sagittal view (YZ plane)
+    axes[2].imshow(sagittal_slice, cmap='gray', origin='lower')
+    axes[2].set_title(f'{title}\nSagittal View (YZ plane)')
+    axes[2].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"   Saved orthogonal views: {output_path}")
 
 def main():
     # Configuration
@@ -108,6 +149,13 @@ def main():
     np.save(output_dir / f"sample_{sample_idx}_stage3.npy", stage3_np)
     np.save(output_dir / f"sample_{sample_idx}_ground_truth.npy", gt_np)
     
+    # Save orthogonal views (axial, coronal, sagittal)
+    print("\nGenerating orthogonal views...")
+    save_orthogonal_views(stage1_np, output_dir / f"sample_{sample_idx}_stage1_views.png", "Stage 1 (64³)")
+    save_orthogonal_views(stage2_np, output_dir / f"sample_{sample_idx}_stage2_views.png", "Stage 2 (128³)")
+    save_orthogonal_views(stage3_np, output_dir / f"sample_{sample_idx}_stage3_views.png", "Stage 3 (256³)")
+    save_orthogonal_views(gt_np, output_dir / f"sample_{sample_idx}_ground_truth_views.png", "Ground Truth")
+    
     # Save input X-rays
     xray_frontal = xrays[0, 0, 0].cpu().numpy()
     xray_lateral = xrays[0, 1, 0].cpu().numpy()
@@ -140,10 +188,16 @@ def main():
     print(f"Stage 3: PSNR = {psnr3:.2f} dB, SSIM = {ssim3:.4f}")
     
     print(f"\n✅ Inference complete! Results saved to {output_dir}/")
+    print(f"\nNIfTI Volumes (3D):")
     print(f"   - Stage 1 (64³): {output_dir}/sample_{sample_idx}_stage1.nii.gz")
     print(f"   - Stage 2 (128³): {output_dir}/sample_{sample_idx}_stage2.nii.gz")
     print(f"   - Stage 3 (256³): {output_dir}/sample_{sample_idx}_stage3.nii.gz")
     print(f"   - Ground Truth: {output_dir}/sample_{sample_idx}_ground_truth.nii.gz")
+    print(f"\nOrthogonal Views (Axial/Coronal/Sagittal):")
+    print(f"   - Stage 1 views: {output_dir}/sample_{sample_idx}_stage1_views.png")
+    print(f"   - Stage 2 views: {output_dir}/sample_{sample_idx}_stage2_views.png")
+    print(f"   - Stage 3 views: {output_dir}/sample_{sample_idx}_stage3_views.png")
+    print(f"   - Ground truth views: {output_dir}/sample_{sample_idx}_ground_truth_views.png")
 
 if __name__ == "__main__":
     main()
