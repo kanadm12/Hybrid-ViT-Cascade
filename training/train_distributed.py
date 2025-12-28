@@ -446,30 +446,35 @@ def train_stage(model: DDP,
                 }, checkpoint_path)
                 print(f"  Saved best checkpoint: {checkpoint_path}")
                 
-                # Visualize features when best model is saved
-                try:
-                    import matplotlib
-                    matplotlib.use('Agg')  # Non-interactive backend
-                    
-                    # Get a validation batch for visualization
-                    val_batch = next(iter(val_loader))
-                    
-                    # Save to workspace directory
-                    viz_dir = Path('/workspace/feature_maps') / stage_name
-                    viz_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    viz_figs = visualize_epoch_features(
-                        model=model.module,
-                        val_batch=val_batch,
-                        epoch=epoch,
-                        stage_name=stage_name,
-                        save_dir=viz_dir,
-                        device=device,
-                        wandb_log=use_wandb
-                    )
-                    print(f"  Feature maps saved to {viz_dir / f'epoch_{epoch:03d}'}")
-                except Exception as e:
-                    print(f"  Warning: Feature visualization failed: {e}")
+                # Visualize features when best model is saved (rank 0 only)
+                if is_main_process:
+                    try:
+                        import matplotlib
+                        matplotlib.use('Agg')  # Non-interactive backend
+                        
+                        # Get a validation batch for visualization
+                        val_batch = next(iter(val_loader))
+                        
+                        # Save to workspace directory
+                        viz_dir = Path('/workspace/feature_maps') / stage_name
+                        viz_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        viz_figs = visualize_epoch_features(
+                            model=model.module,
+                            val_batch=val_batch,
+                            epoch=epoch,
+                            stage_name=stage_name,
+                            save_dir=viz_dir,
+                            device=device,
+                            wandb_log=use_wandb
+                        )
+                            print(f"  Feature maps saved to {viz_dir / f'epoch_{epoch:03d}'}")
+                    except Exception as e:
+                        print(f"  Warning: Feature visualization failed: {e}")
+                
+                # Wait for rank 0 to finish visualization
+                if dist.is_initialized():
+                    dist.barrier()
             
             # Save checkpoint every epoch if requested
             if save_all_checkpoints:
