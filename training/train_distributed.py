@@ -620,6 +620,8 @@ def main():
             batch_size_total = config['training'].get('batch_size_stage2', config['training'].get('batch_size', 4))
         elif stage_name == 'stage3':
             batch_size_total = config['training'].get('batch_size_stage3', config['training'].get('batch_size', 4))
+        elif stage_name == 'stage4':
+            batch_size_total = config['training'].get('batch_size_stage4', config['training'].get('batch_size', 4))
         else:
             batch_size_total = config['training'].get('batch_size', 4)
         

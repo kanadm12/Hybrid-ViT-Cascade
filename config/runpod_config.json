@@ -39,6 +39,16 @@
       "use_depth_lifting": true,
       "use_physics_loss": true,
       "physics_weight": 0.5
+    },
+    {
+      "name": "stage4",
+      "volume_size": [512, 512, 512],
+      "voxel_dim": 768,
+      "vit_depth": 10,
+      "num_heads": 12,
+      "use_depth_lifting": true,
+      "use_physics_loss": true,
+      "physics_weight": 0.6
     }
   ],
   
@@ -48,6 +58,7 @@
     "batch_size": 32,
     "batch_size_stage2": 16,
     "batch_size_stage3": 8,
+    "batch_size_stage4": 4,
     "learning_rate": 1e-4,
     "num_epochs_per_stage": 30,
     "gradient_clip": 1.0,
