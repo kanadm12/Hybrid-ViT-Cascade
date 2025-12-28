@@ -27,6 +27,9 @@ import wandb
 import os
 from typing import Dict, Optional
 
+# Increase NCCL timeout to 30 minutes for slow operations
+os.environ['NCCL_TIMEOUT'] = '1800'
+
 # Add parent to path
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
@@ -165,6 +168,19 @@ def train_stage(model: DDP,
     
     is_main_process = (rank == 0)
     best_val_loss = float('inf')
+    
+    # Initialize LPIPS once at the start (rank 0 only)
+    lpips_model = None
+    if is_main_process:
+        try:
+            from models.feature_metrics import LPIPS3D, LPIPS_AVAILABLE
+            if LPIPS_AVAILABLE:
+                print("Initializing LPIPS model for metrics...")
+                lpips_model = LPIPS3D(net='alex').to(device)
+                lpips_model.eval()
+                print("LPIPS model ready")
+        except Exception as e:
+            print(f"LPIPS initialization failed: {e}")
     
     # Freeze all stages except current (on the underlying module)
     for name, stage in model.module.stages.items():
@@ -374,17 +390,15 @@ def train_stage(model: DDP,
                        ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
                 val_metrics['ssim'] = ssim.item()
                 
-                # LPIPS calculation (if available)
-                try:
-                    from models.feature_metrics import LPIPS3D, LPIPS_AVAILABLE
-                    if LPIPS_AVAILABLE:
-                        lpips_model = LPIPS3D(net='alex').to(device)
-                        lpips_model.eval()
+                # LPIPS calculation (if available and model initialized)
+                if lpips_model is not None:
+                    try:
                         lpips_score = lpips_model(pred_volume, volumes)
                         val_metrics['lpips'] = lpips_score.item()
-                        del lpips_model
-                except Exception as lpips_error:
-                    print(f"  [INFO] LPIPS not available: {lpips_error}")
+                    except Exception as lpips_error:
+                        print(f"  [INFO] LPIPS calculation failed: {lpips_error}")
+                        val_metrics['lpips'] = 0.0
+                else:
                     val_metrics['lpips'] = 0.0
                 
                 # Clean up
@@ -483,10 +497,6 @@ def train_stage(model: DDP,
                     print(f"  Feature maps saved to {viz_dir / f'epoch_{epoch:03d}'}")
                 except Exception as e:
                     print(f"  Warning: Feature visualization failed: {e}")
-            
-            # Wait for rank 0 to finish visualization
-            if (epoch + 1) % 5 == 0 and dist.is_initialized():
-                dist.barrier()
         
         # Step scheduler
         if scheduler is not None:
