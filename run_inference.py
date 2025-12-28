@@ -68,11 +68,9 @@ def main():
     # Load test dataset
     print("\nLoading test dataset...")
     dataset = PatientDRRDataset(
-        data_dir="/workspace/drr_patient_data",  # Change if running locally
-        split='test',
-        volume_size=config['stage_configs'][-1]['volume_size'],  # Stage 3 size
-        xray_size=config['xray_config']['img_size'],
-        num_views=config['xray_config']['num_views'],
+        data_path="/workspace/drr_patient_data",  # Change if running locally
+        target_xray_size=config['xray_config']['img_size'],
+        target_volume_size=tuple(config['stage_configs'][-1]['volume_size']),  # Stage 3 size
         normalize_range=(-1, 1)
     )
     
