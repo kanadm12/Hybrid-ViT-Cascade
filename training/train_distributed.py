@@ -582,7 +582,8 @@ def main():
                     find_unused_parameters=False, broadcast_buffers=False)
     
     # Resume from checkpoint if specified
-    start_stage_idx = args.start_stage if args.start_stage is not None else 0
+    # start_stage is 1-based (user passes 4 for stage4), convert to 0-based index
+    start_stage_idx = (args.start_stage - 1) if args.start_stage is not None else 0
     if args.resume_from and is_main_process:
         print(f"\nLoading checkpoint from {args.resume_from}")
         checkpoint = torch.load(args.resume_from, map_location=device, weights_only=False)
@@ -596,7 +597,8 @@ def main():
         print(f"  Note: strict=False allows missing keys (e.g., feature_extractor)")
     
     if args.start_stage is not None and is_main_process:
-        print(f"\nStarting from stage {args.start_stage + 1} (stage{args.start_stage + 1})")
+        stage_name_to_start = config['stage_configs'][start_stage_idx]['name']
+        print(f"\nStarting from stage {args.start_stage} ({stage_name_to_start})")
     elif args.resume_from and is_main_process:
         # If no explicit start_stage, detect from checkpoint
         checkpoint = torch.load(args.resume_from, map_location=device, weights_only=False)
