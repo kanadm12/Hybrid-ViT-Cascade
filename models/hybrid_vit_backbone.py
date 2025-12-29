@@ -227,7 +227,8 @@ class HybridViT3D(nn.Module):
         
         # Output projection
         self.norm = nn.LayerNorm(voxel_dim)
-        self.output_proj = nn.Linear(voxel_dim, in_channels)
+        # Always output 1 channel (denoised volume), regardless of input channels
+        self.output_proj = nn.Linear(voxel_dim, 1)
     
     def forward(self,
                 x: torch.Tensor,
@@ -262,10 +263,10 @@ class HybridViT3D(nn.Module):
         
         # Output
         x = self.norm(x)
-        x = self.output_proj(x)  # (B, D_down*H_down*W_down, C)
+        x = self.output_proj(x)  # (B, D_down*H_down*W_down, 1)
         
-        # Reshape back to downsampled volume
-        x = x.transpose(1, 2).reshape(batch_size, self.in_channels, D_down, H_down, W_down)
+        # Reshape back to downsampled volume - always 1 channel output
+        x = x.transpose(1, 2).reshape(batch_size, 1, D_down, H_down, W_down)
         
         # Upsample back to original resolution
         x = F.interpolate(x, size=(D, H, W), mode='trilinear', align_corners=True)
