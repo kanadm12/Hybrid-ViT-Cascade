@@ -60,7 +60,7 @@
     "batch_size_stage3": 8,
     "batch_size_stage4": 1,
     "learning_rate": 5e-5,
-    "num_epochs_per_stage": 50,
+    "num_epochs_per_stage": 30,
     "gradient_clip": 1.0,
     "ema_decay": 0.9999,
     "num_workers": 4,
@@ -71,6 +71,7 @@
   
   "data": {
     "dataset_path": "/workspace/drr_patient_data",
+    "max_patients": 1000,
     "train_split": 0.8,
     "val_split": 0.1,
     "test_split": 0.1,
