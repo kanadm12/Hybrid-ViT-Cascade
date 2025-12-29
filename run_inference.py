@@ -111,7 +111,7 @@ def main():
     # Run inference through cascade
     # NOTE: During training, each stage is trained independently (prev_stage_volume=None)
     # For inference, we can either use stages independently or chain them
-    # Let's use them independently as trained, with more diffusion steps for quality
+    # Using many diffusion steps for better quality (full schedule = 1000)
     
     print("\n" + "="*60)
     print("STAGE 1: Coarse Reconstruction (64³)")
@@ -119,7 +119,7 @@ def main():
     volume_stage1 = reconstruct_volume(
         model, xrays, 
         stage_name='stage1', 
-        num_steps=100,  # More steps for better quality
+        num_steps=250,  # Use 1/4 of full schedule for speed
         device=device
     )
     volume_stage1 = torch.clamp(volume_stage1, -1, 1)
@@ -130,7 +130,7 @@ def main():
     volume_stage2 = reconstruct_volume(
         model, xrays,
         stage_name='stage2',
-        num_steps=100,
+        num_steps=250,
         device=device
     )
     volume_stage2 = torch.clamp(volume_stage2, -1, 1)
@@ -141,7 +141,7 @@ def main():
     volume_stage3 = reconstruct_volume(
         model, xrays,
         stage_name='stage3',
-        num_steps=100,
+        num_steps=250,
         device=device
     )
     volume_stage3 = torch.clamp(volume_stage3, -1, 1)
@@ -209,17 +209,17 @@ def main():
     
     # Stage 1 metrics (64³)
     psnr1 = psnr_metric(volume_stage1, gt_64)
-    ssim1 = ssim_metric(volume_stage1.unsqueeze(1), gt_64.unsqueeze(1))
+    ssim1 = ssim_metric(volume_stage1, gt_64)  # Already has correct shape [B, C, D, H, W]
     print(f"Stage 1 (64³):  PSNR = {psnr1:.2f} dB, SSIM = {ssim1:.4f}")
     
     # Stage 2 metrics (128³)
     psnr2 = psnr_metric(volume_stage2, gt_128)
-    ssim2 = ssim_metric(volume_stage2.unsqueeze(1), gt_128.unsqueeze(1))
+    ssim2 = ssim_metric(volume_stage2, gt_128)
     print(f"Stage 2 (128³): PSNR = {psnr2:.2f} dB, SSIM = {ssim2:.4f}")
     
     # Stage 3 metrics (256³)
     psnr3 = psnr_metric(volume_stage3, gt_256)
-    ssim3 = ssim_metric(volume_stage3.unsqueeze(1), gt_256.unsqueeze(1))
+    ssim3 = ssim_metric(volume_stage3, gt_256)
     print(f"Stage 3 (256³): PSNR = {psnr3:.2f} dB, SSIM = {ssim3:.4f}")
     
     print(f"\n✅ Inference complete! Results saved to {output_dir}/")
