@@ -87,7 +87,8 @@ def create_dataloaders(config: Dict, stage_config: Dict, batch_size: int,
         'validate_alignment': data_config.get('validate_alignment', True) and rank == 0,  # Only validate on main process
         'augmentation': data_config.get('augmentation', False),
         'cache_in_memory': data_config.get('cache_in_memory', False),
-        'flip_drrs_vertical': data_config.get('flip_drrs_vertical', False)
+        'flip_drrs_vertical': data_config.get('flip_drrs_vertical', False),
+        'max_patients': data_config.get('max_patients', None)
     }
     
     # Create datasets
