@@ -133,8 +133,8 @@ def reconstruct_volume(model, xrays, stage_name='stage3', num_steps=50, device='
             # epsilon-parameterization: predict x_0 from noise
             pred_x0 = (x - sqrt_one_minus_alphas_t * predicted) / torch.clamp(sqrt_alphas_t, min=1e-8)
         
-        # Clamp to reasonable range
-        pred_x0 = torch.clamp(pred_x0, -10.0, 10.0)
+        # Clamp to training range [-1, 1]
+        pred_x0 = torch.clamp(pred_x0, -1.0, 1.0)
         
         # DDIM step (deterministic)
         if i < len(timesteps) - 1:
@@ -153,7 +153,11 @@ def reconstruct_volume(model, xrays, stage_name='stage3', num_steps=50, device='
             # Final step - use predicted x_0
             x = pred_x0
     
+    # Final clamp to ensure output is in [-1, 1] range
+    x = torch.clamp(x, -1.0, 1.0)
+    
     print("Reconstruction complete!")
+    print(f"  Output range: [{x.min().item():.3f}, {x.max().item():.3f}]")
     return x
 
 
@@ -200,15 +204,15 @@ def visualize_slices(volume, xrays, output_path):
     axes[0, 2].axis('off')
     
     # Reconstructed volume slices
-    axes[1, 0].imshow(volume_np[D//2, :, :], cmap='bone')
+    axes[1, 0].imshow(volume_np[D//2, :, :], cmap='bone', vmin=-1, vmax=1)
     axes[1, 0].set_title(f'Axial Slice (z={D//2})')
     axes[1, 0].axis('off')
     
-    axes[1, 1].imshow(volume_np[:, H//2, :], cmap='bone')
+    axes[1, 1].imshow(volume_np[:, H//2, :], cmap='bone', vmin=-1, vmax=1)
     axes[1, 1].set_title(f'Coronal Slice (y={H//2})')
     axes[1, 1].axis('off')
     
-    axes[1, 2].imshow(volume_np[:, :, W//2], cmap='bone')
+    axes[1, 2].imshow(volume_np[:, :, W//2], cmap='bone', vmin=-1, vmax=1)
     axes[1, 2].set_title(f'Sagittal Slice (x={W//2})')
     axes[1, 2].axis('off')
     
