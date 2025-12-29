@@ -30,26 +30,37 @@ class DRRRenderer(nn.Module):
         
     def forward(self, volume: torch.Tensor, angle: float = 0) -> torch.Tensor:
         """
-        Generate DRR by summing along depth dimension
+        Generate DRR using Beer-Lambert attenuation law
         
         Args:
-            volume: (B, D, H, W) - 3D volume
-            angle: Rotation angle in degrees (0=AP, 90=lateral)
+            volume: (B, D, H, W) - 3D volume (normalized to [-1, 1])
+            angle: Rotation angle in degrees (0=frontal, 90=lateral)
         
         Returns:
             drr: (B, H, W) - 2D projection
         """
+        # FIXED: Apply exponential attenuation (Beer-Lambert law)
+        # I = I₀ * exp(-μt), where μ is attenuation coefficient
+        # For soft tissue μ ≈ 0.15-0.20 cm⁻¹, rescale for normalized [-1,1] data
+        mu = 0.3  # Effective attenuation for normalized intensities
+        
+        # Convert from [-1, 1] to [0, 2] for attenuation
+        volume_shifted = volume + 1.0  # Now in [0, 2]
+        
+        # Apply attenuation: higher intensity = more attenuation
+        attenuation = torch.exp(-mu * volume_shifted)
+        
         if angle == 90:
             # Lateral view: sum along width dimension
-            drr = volume.sum(dim=-1)  # (B, D, H)
-            # Transpose to match expected output shape
+            drr = attenuation.sum(dim=-1)  # (B, D, H)
             drr = drr.transpose(1, 2)  # (B, H, D)
         else:
-            # AP view: sum along depth dimension
-            drr = volume.sum(dim=1)  # (B, H, W)
+            # Frontal (AP) view: sum along depth dimension
+            drr = attenuation.sum(dim=1)  # (B, H, W)
         
-        # Normalize to [0, 1] range
-        drr = (drr - drr.min()) / (drr.max() - drr.min() + 1e-8)
+        # FIXED: Remove per-sample normalization - it makes loss scale-invariant
+        # Just ensure reasonable range for numerical stability
+        drr = torch.clamp(drr, min=1e-6)  # Avoid log(0) if used elsewhere
         
         return drr
 

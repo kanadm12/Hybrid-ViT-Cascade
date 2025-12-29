@@ -55,13 +55,14 @@ class UnifiedCascadeStage(nn.Module):
                 depth_sizes=[D],
                 use_prev_stage=use_prev_stage
             )
-            # Project depth features to 1 channel to match noisy_volume
-            self.depth_to_volume = nn.Conv3d(xray_feature_dim, in_channels, kernel_size=1)
+            # FIXED: Project to 16 channels (was 1) to preserve spatial features
+            self.depth_to_volume = nn.Conv3d(xray_feature_dim, 16, kernel_size=1)
         
-        # Hybrid-ViT backbone
+        # Hybrid-ViT backbone - will receive 1+16=17 channels when depth lifting enabled
+        vit_in_channels = in_channels + 16 if use_depth_lifting else in_channels
         self.vit_backbone = HybridViT3D(
             volume_size=volume_size,
-            in_channels=in_channels,
+            in_channels=vit_in_channels,
             voxel_dim=voxel_dim,
             depth=vit_depth,
             num_heads=num_heads,
@@ -106,15 +107,17 @@ class UnifiedCascadeStage(nn.Module):
                 target_depth=D,
                 prev_stage_volume=prev_stage_volume
             )
-            # Project to 1 channel and combine with noisy volume
-            depth_prior = self.depth_to_volume(depth_prior)
+            # FIXED: Project from 512 to 16 channels (was 1) to preserve more information
+            depth_prior = self.depth_to_volume(depth_prior)  # 512 → 16 channels
             
-            # Ensure depth_prior matches noisy_volume size
-            if depth_prior.shape != noisy_volume.shape:
+            # Ensure depth_prior matches noisy_volume spatial size
+            if depth_prior.shape[2:] != noisy_volume.shape[2:]:
                 depth_prior = F.interpolate(depth_prior, size=(D, H, W), 
                                            mode='trilinear', align_corners=True)
             
-            noisy_volume = noisy_volume + 0.1 * depth_prior  # Weak prior
+            # Concatenate depth prior with noisy volume instead of adding
+            # ViT voxel_embed will handle fusion of 1+16=17 input channels
+            noisy_volume = torch.cat([noisy_volume, depth_prior], dim=1)  # (B, 17, D, H, W)
         
         # ViT denoising
         predicted = self.vit_backbone(
@@ -223,7 +226,8 @@ class UnifiedHybridViTCascade(nn.Module):
             steps = self.num_timesteps + 1
             x = torch.linspace(0, self.num_timesteps, steps)
             alphas_cumprod = torch.cos(((x / self.num_timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
-            alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+            # FIXED: Don't normalize by alphas_cumprod[0] - it forces ᾱ₀=1 (zero noise)
+            # Standard cosine schedule from Improved DDPM (Nichol & Dhariwal 2021)
             betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
             betas = torch.clamp(betas, 0.0001, 0.9999)
         else:
@@ -354,8 +358,12 @@ class UnifiedHybridViTCascade(nn.Module):
             view_losses = []
             
             for view_idx in range(num_views):
-                # Render DRR (squeeze channel dimension for renderer)
-                drr_pred = stage.drr_renderer(pred_x_start.squeeze(1))  # (B, H, W)
+                # FIXED: Pass correct angle for each view
+                # View 0 = frontal (0°), View 1 = lateral (90°)
+                angle = 90.0 if view_idx == 1 else 0.0
+                
+                # Render DRR with correct angle (squeeze channel dimension for renderer)
+                drr_pred = stage.drr_renderer(pred_x_start.squeeze(1), angle=angle)  # (B, H, W)
                 xray_target = xrays[:, view_idx, 0]  # Current view
                 
                 # Downsample if needed
