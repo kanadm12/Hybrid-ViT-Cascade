@@ -72,6 +72,16 @@ def main():
     if 'epoch' in checkpoint:
         print(f"  Checkpoint from epoch {checkpoint['epoch']}")
         print(f"  Training stage: {checkpoint.get('stage_name', 'unknown')}")
+        print(f"  Val loss: {checkpoint.get('val_loss', 'N/A')}")
+    
+    # Check if stage weights are non-trivial
+    print("\nModel weight statistics:")
+    for stage_name in ['stage1', 'stage2', 'stage3']:
+        stage = model.stages[stage_name]
+        total_params = sum(p.numel() for p in stage.parameters())
+        weight_mean = sum(p.abs().mean().item() * p.numel() for p in stage.parameters()) / total_params
+        weight_std = sum(p.std().item() * p.numel() for p in stage.parameters()) / total_params
+        print(f"  {stage_name}: {total_params/1e6:.1f}M params, mean={weight_mean:.4f}, std={weight_std:.4f}")
     
     # Test a forward pass
     print("\nTesting model output...")
@@ -95,8 +105,8 @@ def main():
     print(f"Patient ID: {sample['patient_id']}")
     
     # Prepare input
-    xrays = sample['drr_stacked'].unsqueeze(0)  # Add batch dimension
-    gt_volume = sample['ct_volume'].unsqueeze(0)
+    xrays = sample['drr_stacked'].unsqueeze(0).to(device)  # Add batch dimension
+    gt_volume = sample['ct_volume'].unsqueeze(0).to(device)
     
     # Run inference through cascade
     # NOTE: During training, each stage is trained independently (prev_stage_volume=None)
