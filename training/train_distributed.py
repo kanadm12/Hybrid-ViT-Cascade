@@ -30,6 +30,9 @@ from typing import Dict, Optional
 # Increase NCCL timeout to 30 minutes for slow operations
 os.environ['NCCL_TIMEOUT'] = '1800'
 
+# Enable PyTorch memory optimization for large volumes
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 # Add parent to path
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
