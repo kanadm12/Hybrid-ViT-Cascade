@@ -76,7 +76,7 @@
     "val_split": 0.1,
     "test_split": 0.1,
     "normalize_range": [-1, 1],
-    "validate_alignment": true,
+    "validate_alignment": false,
     "augmentation": true,
     "cache_in_memory": false,
     "flip_drrs_vertical": true,

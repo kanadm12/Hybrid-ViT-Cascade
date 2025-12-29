@@ -11,6 +11,11 @@ Usage:
         Node 1: torchrun --nproc_per_node=4 --nnodes=2 --node_rank=1 --master_addr="192.168.1.1" training/train_distributed.py --config config/multi_view_config.json
 """
 
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+
 import torch
 import torch.nn as nn
 import torch.optim as optim

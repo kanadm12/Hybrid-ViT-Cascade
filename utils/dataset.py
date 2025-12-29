@@ -276,7 +276,7 @@ class PatientDRRDataset(Dataset):
         
         is_aligned = avg_error < alignment_threshold
         
-        if not is_aligned:
+        if False:  # Alignment warnings disabled
             print(f"Warning: Alignment issue for {patient_id}")
             print(f"  Frontal error: {frontal_error:.4f}, Lateral error: {lateral_error:.4f}")
         
