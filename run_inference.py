@@ -64,6 +64,17 @@ def main():
     # Load model
     print("Loading model...")
     model = load_model(checkpoint_path, config, device)
+    model.eval()
+    
+    # Check which stages are actually trained
+    print("\nChecking model stages...")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    if 'epoch' in checkpoint:
+        print(f"  Checkpoint from epoch {checkpoint['epoch']}")
+        print(f"  Training stage: {checkpoint.get('stage_name', 'unknown')}")
+    
+    # Test a forward pass
+    print("\nTesting model output...")
     
     # Load test dataset
     print("\nLoading test dataset...")
@@ -87,16 +98,21 @@ def main():
     xrays = sample['drr_stacked'].unsqueeze(0)  # Add batch dimension
     gt_volume = sample['ct_volume'].unsqueeze(0)
     
-    # Run inference through all stages
+    # Run inference through cascade
+    # NOTE: During training, each stage is trained independently (prev_stage_volume=None)
+    # For inference, we can either use stages independently or chain them
+    # Let's use them independently as trained, with more diffusion steps for quality
+    
     print("\n" + "="*60)
     print("STAGE 1: Coarse Reconstruction (64³)")
     print("="*60)
     volume_stage1 = reconstruct_volume(
         model, xrays, 
         stage_name='stage1', 
-        num_steps=50,  # Increase for better quality
+        num_steps=100,  # More steps for better quality
         device=device
     )
+    volume_stage1 = torch.clamp(volume_stage1, -1, 1)
     
     print("\n" + "="*60)
     print("STAGE 2: Medium Resolution (128³)")
@@ -104,9 +120,10 @@ def main():
     volume_stage2 = reconstruct_volume(
         model, xrays,
         stage_name='stage2',
-        num_steps=50,
+        num_steps=100,
         device=device
     )
+    volume_stage2 = torch.clamp(volume_stage2, -1, 1)
     
     print("\n" + "="*60)
     print("STAGE 3: High Resolution (256³)")
@@ -114,13 +131,9 @@ def main():
     volume_stage3 = reconstruct_volume(
         model, xrays,
         stage_name='stage3',
-        num_steps=50,
+        num_steps=100,
         device=device
     )
-    
-    # Clamp to valid range [-1, 1]
-    volume_stage1 = torch.clamp(volume_stage1, -1, 1)
-    volume_stage2 = torch.clamp(volume_stage2, -1, 1)
     volume_stage3 = torch.clamp(volume_stage3, -1, 1)
     
     # Save results
@@ -174,24 +187,30 @@ def main():
     print("="*60)
     
     from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
+    import torch.nn.functional as F
     
     psnr_metric = PeakSignalNoiseRatio(data_range=2.0).to(device)  # Range is [-1, 1] = 2.0
     ssim_metric = StructuralSimilarityIndexMeasure(data_range=2.0).to(device)
     
-    # Stage 1 metrics
-    psnr1 = psnr_metric(volume_stage1, gt_volume)
-    ssim1 = ssim_metric(volume_stage1.unsqueeze(1), gt_volume.unsqueeze(1))
-    print(f"Stage 1: PSNR = {psnr1:.2f} dB, SSIM = {ssim1:.4f}")
+    # Resize ground truth to match each stage for fair comparison
+    gt_256 = F.interpolate(gt_volume, size=(256, 256, 256), mode='trilinear', align_corners=False)
+    gt_128 = F.interpolate(gt_volume, size=(128, 128, 128), mode='trilinear', align_corners=False)
+    gt_64 = F.interpolate(gt_volume, size=(64, 64, 64), mode='trilinear', align_corners=False)
     
-    # Stage 2 metrics
-    psnr2 = psnr_metric(volume_stage2, gt_volume)
-    ssim2 = ssim_metric(volume_stage2.unsqueeze(1), gt_volume.unsqueeze(1))
-    print(f"Stage 2: PSNR = {psnr2:.2f} dB, SSIM = {ssim2:.4f}")
+    # Stage 1 metrics (64³)
+    psnr1 = psnr_metric(volume_stage1, gt_64)
+    ssim1 = ssim_metric(volume_stage1.unsqueeze(1), gt_64.unsqueeze(1))
+    print(f"Stage 1 (64³):  PSNR = {psnr1:.2f} dB, SSIM = {ssim1:.4f}")
     
-    # Stage 3 metrics
-    psnr3 = psnr_metric(volume_stage3, gt_volume)
-    ssim3 = ssim_metric(volume_stage3.unsqueeze(1), gt_volume.unsqueeze(1))
-    print(f"Stage 3: PSNR = {psnr3:.2f} dB, SSIM = {ssim3:.4f}")
+    # Stage 2 metrics (128³)
+    psnr2 = psnr_metric(volume_stage2, gt_128)
+    ssim2 = ssim_metric(volume_stage2.unsqueeze(1), gt_128.unsqueeze(1))
+    print(f"Stage 2 (128³): PSNR = {psnr2:.2f} dB, SSIM = {ssim2:.4f}")
+    
+    # Stage 3 metrics (256³)
+    psnr3 = psnr_metric(volume_stage3, gt_256)
+    ssim3 = ssim_metric(volume_stage3.unsqueeze(1), gt_256.unsqueeze(1))
+    print(f"Stage 3 (256³): PSNR = {psnr3:.2f} dB, SSIM = {ssim3:.4f}")
     
     print(f"\n✅ Inference complete! Results saved to {output_dir}/")
     print(f"\nNIfTI Volumes (3D):")
