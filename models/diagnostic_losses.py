@@ -77,16 +77,21 @@ class XrayConditioningModule(nn.Module):
         self.embed_dim = embed_dim
         self.cond_dim = cond_dim
         
+        # FIXED: Add BatchNorm to prevent feature collapse
+        # Without BN, ReLU kills gradients and features vanish to ~0
         self.encoder = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
             
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             nn.Conv2d(128, embed_dim, kernel_size=3, padding=1),
+            nn.BatchNorm2d(embed_dim),
             nn.ReLU(inplace=True),
         )
         
