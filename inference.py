@@ -108,8 +108,9 @@ def reconstruct_volume(model, xrays, stage_name='stage3', num_steps=50, device='
     for i, t in enumerate(tqdm(timesteps, desc="Diffusion steps")):
         t_batch = t.unsqueeze(0).expand(batch_size)
         
-        # Get timestep embeddings
-        timestep_embed = model.time_embed(t_batch.float())
+        # Get timestep embeddings (FIXED: normalize to [0,1] to match training)
+        t_normalized = t_batch.float() / model.num_timesteps
+        timestep_embed = model.time_embed(t_normalized.unsqueeze(-1))
         _, time_xray_cond_step, _ = model.xray_encoder(xrays, timestep_embed)
         
         # Predict noise/velocity
@@ -144,7 +145,9 @@ def reconstruct_volume(model, xrays, stage_name='stage3', num_steps=50, device='
             
             # Recompute noise from pred_x0 and current x
             if model.v_parameterization:
-                pred_noise = (sqrt_alphas_t * x - pred_x0) / torch.clamp(sqrt_one_minus_alphas_t, min=1e-8)
+                # FIXED: Correct formula for noise recovery from v-prediction
+                # pred_noise = (x_t - sqrt(α̅_t) * x_0) / sqrt(1 - α̅_t)
+                pred_noise = (x - sqrt_alphas_t * pred_x0) / torch.clamp(sqrt_one_minus_alphas_t, min=1e-8)
             else:
                 pred_noise = predicted
             

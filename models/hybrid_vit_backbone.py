@@ -172,9 +172,15 @@ class HybridViT3D(nn.Module):
         self.use_prev_stage = use_prev_stage
         
         # Adaptive downsampling based on volume size to keep token count manageable
-        # Target: ~4096 tokens (16³) for all stages
+        # FIXED: Less aggressive downsampling to preserve details
+        # Stage 1 (64³): 16³ tokens (4096), Stage 2 (128³): ~24³ tokens (13824), Stage 3 (256³): ~32³ tokens (32768)
         D, H, W = volume_size
-        target_size = 16
+        if D <= 64:
+            target_size = 16  # Stage 1: 64³ → 16³
+        elif D <= 128:
+            target_size = 24  # Stage 2: 128³ → 24³ (5.3x downsample)
+        else:
+            target_size = 32  # Stage 3: 256³ → 32³ (8x downsample)
         downsample_factor = max(D // target_size, H // target_size, W // target_size)
         downsample_factor = max(downsample_factor, 1)  # At least 1
         

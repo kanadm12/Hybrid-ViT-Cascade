@@ -211,13 +211,15 @@ class PatientDRRDataset(Dataset):
                 align_corners=False
             ).squeeze(0)
         
-        # Clip HU values (typical CT range: -1000 to 3000)
-        volume_tensor = torch.clamp(volume_tensor, -1000, 3000)
+        # FIXED: Use soft tissue window [-200, 200 HU] for better contrast
+        # This maps: Air(-200)→-1, Soft tissue(0-100)→[-0.5,0], Bone(200)→+1
+        # Previous [-1000,3000] compressed all soft tissue into narrow range
+        volume_tensor = torch.clamp(volume_tensor, -200, 200)
         
         # Normalize to [0, 1]
-        volume_tensor = (volume_tensor + 1000) / 4000
+        volume_tensor = (volume_tensor + 200) / 400
         
-        # Normalize to target range
+        # Normalize to target range [-1, 1]
         min_val, max_val = self.normalize_range
         volume_tensor = volume_tensor * (max_val - min_val) + min_val
         

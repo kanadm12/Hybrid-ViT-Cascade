@@ -346,8 +346,8 @@ class UnifiedHybridViTCascade(nn.Module):
                 sqrt_alphas_t = torch.clamp(sqrt_alphas_t, min=1e-8)
                 pred_x_start = (x_noisy - sqrt_one_minus_alphas_t * predicted) / sqrt_alphas_t
             
-            # Clamp predicted volume to reasonable range to prevent extreme DRR values
-            pred_x_start = torch.clamp(pred_x_start, -10.0, 10.0)
+            # FIXED: Clamp to match data range [-1, 1] with slight margin
+            pred_x_start = torch.clamp(pred_x_start, -1.5, 1.5)
             
             # Multi-view DRR loss (support both single and multi-view)
             num_views = xrays.shape[1]
