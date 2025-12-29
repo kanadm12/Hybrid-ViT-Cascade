@@ -361,12 +361,10 @@ def train_stage(model: DDP,
                             alpha_prev = torch.ones_like(alpha_t)
                         
                         # Convert v-prediction to x0 prediction
-                        # FIXED: v-prediction formula is x_0 = sqrt(alpha_t) * x_t + sqrt(1-alpha_t) * v
-                        # NOT minus! Previous subtraction caused catastrophic reconstruction failure
                         sqrt_alpha_t = torch.sqrt(alpha_t)
                         sqrt_one_minus_alpha_t = torch.sqrt(1 - alpha_t)
                         
-                        pred_x0 = sqrt_alpha_t * pred_volume + sqrt_one_minus_alpha_t * model_output
+                        pred_x0 = sqrt_alpha_t * pred_volume - sqrt_one_minus_alpha_t * model_output
                         
                         # DDIM update
                         if i < len(timesteps) - 1:
