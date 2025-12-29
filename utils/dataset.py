@@ -40,7 +40,8 @@ class PatientDRRDataset(Dataset):
         validate_alignment: bool = True,
         augmentation: bool = False,
         cache_in_memory: bool = False,
-        flip_drrs_vertical: bool = False
+        flip_drrs_vertical: bool = False,
+        max_patients: Optional[int] = None
     ):
         """
         Args:
@@ -51,6 +52,7 @@ class PatientDRRDataset(Dataset):
             validate_alignment: Whether to validate DRR-CT alignment
             augmentation: Whether to apply data augmentation
             cache_in_memory: Cache loaded data in memory (for small datasets)
+            max_patients: Maximum number of patients to load (None for all)
         """
         self.data_path = Path(data_path)
         self.target_xray_size = target_xray_size
@@ -69,6 +71,9 @@ class PatientDRRDataset(Dataset):
                     # Verify required files exist
                     if self._validate_patient_folder(folder):
                         self.patient_folders.append(folder)
+                        # Limit to max_patients if specified
+                        if max_patients is not None and len(self.patient_folders) >= max_patients:
+                            break
         
         if len(self.patient_folders) == 0:
             raise ValueError(f"No valid patient folders found in {data_path}")
