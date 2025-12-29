@@ -31,17 +31,17 @@ def save_orthogonal_views(volume, output_path, title="CT Volume"):
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
     # Axial view (XY plane)
-    axes[0].imshow(axial_slice, cmap='gray', origin='lower')
+    axes[0].imshow(axial_slice, cmap='gray', origin='lower', vmin=-1, vmax=1)
     axes[0].set_title(f'{title}\nAxial View (XY plane)')
     axes[0].axis('off')
     
     # Coronal view (XZ plane)
-    axes[1].imshow(coronal_slice, cmap='gray', origin='lower')
+    axes[1].imshow(coronal_slice, cmap='gray', origin='lower', vmin=-1, vmax=1)
     axes[1].set_title(f'{title}\nCoronal View (XZ plane)')
     axes[1].axis('off')
     
     # Sagittal view (YZ plane)
-    axes[2].imshow(sagittal_slice, cmap='gray', origin='lower')
+    axes[2].imshow(sagittal_slice, cmap='gray', origin='lower', vmin=-1, vmax=1)
     axes[2].set_title(f'{title}\nSagittal View (YZ plane)')
     axes[2].axis('off')
     
@@ -149,6 +149,14 @@ def main():
     
     # Save orthogonal views (axial, coronal, sagittal)
     print("\nGenerating orthogonal views...")
+    
+    # Print value statistics for debugging
+    print(f"\nValue ranges:")
+    print(f"  Stage 1: [{stage1_np.min():.3f}, {stage1_np.max():.3f}], mean={stage1_np.mean():.3f}")
+    print(f"  Stage 2: [{stage2_np.min():.3f}, {stage2_np.max():.3f}], mean={stage2_np.mean():.3f}")
+    print(f"  Stage 3: [{stage3_np.min():.3f}, {stage3_np.max():.3f}], mean={stage3_np.mean():.3f}")
+    print(f"  Ground Truth: [{gt_np.min():.3f}, {gt_np.max():.3f}], mean={gt_np.mean():.3f}")
+    
     save_orthogonal_views(stage1_np, output_dir / f"sample_{sample_idx}_stage1_views.png", "Stage 1 (64³)")
     save_orthogonal_views(stage2_np, output_dir / f"sample_{sample_idx}_stage2_views.png", "Stage 2 (128³)")
     save_orthogonal_views(stage3_np, output_dir / f"sample_{sample_idx}_stage3_views.png", "Stage 3 (256³)")
