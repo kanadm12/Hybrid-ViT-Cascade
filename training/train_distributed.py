@@ -451,30 +451,42 @@ def train_stage(model: DDP,
                     'learning_rate': optimizer.param_groups[0]['lr']
                 })
             
-            # Save checkpoint if best
-            if val_losses['total'] < best_val_loss:
+            # Save checkpoint if best (rank 0 only)
+            if is_main_process and val_losses['total'] < best_val_loss:
                 best_val_loss = val_losses['total']
                 checkpoint_path = checkpoint_dir / f"{stage_name}_best.pt"
-                torch.save({
+                checkpoint_data = {
                     'epoch': epoch,
                     'model_state_dict': model.module.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': val_losses['total'],
+                    'psnr': val_metrics['psnr'],
+                    'ssim': val_metrics['ssim'],
+                    'lpips': val_metrics['lpips'],
                     'stage_name': stage_name
-                }, checkpoint_path)
-                print(f"  Saved best checkpoint: {checkpoint_path}")
+                }
+                if scheduler is not None:
+                    checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
+                torch.save(checkpoint_data, checkpoint_path)
+                print(f"  ✓ Saved best checkpoint: {checkpoint_path} (PSNR: {val_metrics['psnr']:.2f} dB)")
             
-            # Save checkpoint every epoch if requested
-            if save_all_checkpoints:
+            # Save checkpoint every epoch if requested (rank 0 only)
+            if is_main_process and save_all_checkpoints:
                 checkpoint_path = checkpoint_dir / f"{stage_name}_epoch_{epoch:03d}.pt"
-                torch.save({
+                checkpoint_data = {
                     'epoch': epoch,
                     'model_state_dict': model.module.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': val_losses['total'],
+                    'psnr': val_metrics['psnr'],
+                    'ssim': val_metrics['ssim'],
+                    'lpips': val_metrics['lpips'],
                     'stage_name': stage_name
-                }, checkpoint_path)
-                print(f"  Saved best checkpoint: {checkpoint_path}")
+                }
+                if scheduler is not None:
+                    checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
+                torch.save(checkpoint_data, checkpoint_path)
+                print(f"  ✓ Saved epoch checkpoint: {checkpoint_path}")
             
             # Visualize features every 5 epochs (rank 0 only)
             if (epoch + 1) % 5 == 0 and is_main_process:
