@@ -17,8 +17,8 @@ if not DATASET_PATH.exists():
 
 print(f"Dataset path: {DATASET_PATH}")
 
-# Find patient folders
-patient_folders = sorted(DATASET_PATH.glob("patient_*"))
+# Find patient folders (any subdirectory)
+patient_folders = sorted([d for d in DATASET_PATH.iterdir() if d.is_dir()])
 if not patient_folders:
     print(f"Error: No patient folders found in {DATASET_PATH}")
     sys.exit(1)
@@ -32,8 +32,11 @@ patient_name = patient_folder.name
 print(f"\nSelected: {patient_name}")
 print(f"Path: {patient_folder}")
 
-# Find DRR files
-drr_files = list(patient_folder.glob("drr_*.png")) + list(patient_folder.glob("drr_*.nii*"))
+# Find DRR files (look for *_drr.png pattern)
+drr_files = list(patient_folder.glob("*_drr.png")) + \
+            list(patient_folder.glob("drr_*.png")) + \
+            list(patient_folder.glob("*_drr.nii*")) + \
+            list(patient_folder.glob("drr_*.nii*"))
 
 if not drr_files:
     print(f"\nError: No DRR files found in {patient_folder}")
