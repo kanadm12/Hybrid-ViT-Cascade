@@ -41,6 +41,6 @@
     "logging": {
         "log_interval": 10,
         "val_interval": 1,
-        "save_checkpoint_interval": 5
+        "save_checkpoint_interval": 1
     }
 }
