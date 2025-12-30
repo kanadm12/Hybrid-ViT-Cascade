@@ -166,8 +166,13 @@ def visualize_feature_maps(model, sample_batch, epoch, save_dir='visualizations'
     
     model.eval()
     with torch.no_grad():
-        xrays = sample_batch['xrays']
-        target = sample_batch['ct_volume']
+        # Handle dict format from PatientDRRDataset
+        if isinstance(sample_batch, dict):
+            xrays = sample_batch['drr_stacked']  # (B, 2, 1, 512, 512)
+            target = sample_batch['ct_volume']
+        else:
+            xrays = sample_batch['xrays']
+            target = sample_batch['ct_volume']
         
         # Forward pass with feature extraction
         batch_size = xrays.shape[0]
@@ -368,6 +373,21 @@ def main():
         enabled=config['optimization']['use_mixed_precision']
     )
     
+    # Check for existing checkpoint to resume from
+    start_epoch = 1
+    best_psnr = 0.0
+    checkpoint_path = Path('checkpoints_optimized/best_model.pt')
+    if checkpoint_path.exists():
+        print(f"\n=== Resuming from checkpoint: {checkpoint_path} ===")
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint.get('epoch', 0) + 1
+        best_psnr = checkpoint.get('psnr', 0.0)
+        print(f"Resumed from epoch {start_epoch-1}, best PSNR: {best_psnr:.2f} dB")
+    
     # Create datasets
     print("\n=== Loading Dataset ===")
     train_dataset = PatientDRRDataset(
@@ -411,9 +431,8 @@ def main():
     
     # Training loop
     print("\n=== Starting Training ===")
-    best_psnr = 0.0
     
-    for epoch in range(1, config['training']['num_epochs'] + 1):
+    for epoch in range(start_epoch, config['training']['num_epochs'] + 1):
         print(f"\n{'='*60}")
         print(f"Epoch {epoch}/{config['training']['num_epochs']}")
         print(f"Learning rate: {optimizer.param_groups[0]['lr']:.6f}")
@@ -449,24 +468,27 @@ def main():
             # Save best model
             if val_psnr > best_psnr:
                 best_psnr = val_psnr
+                Path('checkpoints_optimized').mkdir(exist_ok=True)
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
                     'psnr': val_psnr,
                     'config': config
-                }, 'best_model_optimized.pth')
+                }, 'checkpoints_optimized/best_model.pt')
                 print(f"  ✓ New best model saved! PSNR: {best_psnr:.2f} dB")
         
         # Save checkpoint
         if epoch % config['logging']['save_checkpoint_interval'] == 0:
+            Path('checkpoints_optimized').mkdir(exist_ok=True)
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'config': config
-            }, f'checkpoint_epoch_{epoch}.pth')
+            }, f'checkpoints_optimized/epoch_{epoch}.pt')
         
         # Step scheduler
         scheduler.step()
