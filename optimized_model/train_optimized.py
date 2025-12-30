@@ -199,16 +199,17 @@ def visualize_feature_maps(model, sample_batch, epoch, save_dir='visualizations'
         
         # Plot X-ray encoder features (averaged across channels)
         ax3 = plt.subplot(3, 5, 3)
-        xray_feat = xray_features_2d[0, 0].mean(dim=0).cpu().numpy()
+        xray_feat = xray_features_2d[0].mean(dim=0).cpu().numpy()  # (C, H, W) -> (H, W)
         im3 = ax3.imshow(xray_feat, cmap='viridis')
-        ax3.set_title('X-ray Features (AP)')
+        ax3.set_title('X-ray Features (Avg)')
         ax3.axis('off')
         plt.colorbar(im3, ax=ax3, fraction=0.046)
         
+        # Plot first channel of X-ray features
         ax4 = plt.subplot(3, 5, 4)
-        xray_feat2 = xray_features_2d[0, 1].mean(dim=0).cpu().numpy()
-        im4 = ax4.imshow(xray_feat2, cmap='viridis')
-        ax4.set_title('X-ray Features (Lateral)')
+        xray_feat_ch0 = xray_features_2d[0, 0].cpu().numpy()  # First channel (H, W)
+        im4 = ax4.imshow(xray_feat_ch0, cmap='viridis')
+        ax4.set_title('X-ray Features (Ch 0)')
         ax4.axis('off')
         plt.colorbar(im4, ax=ax4, fraction=0.046)
         
