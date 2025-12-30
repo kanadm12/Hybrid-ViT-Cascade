@@ -55,7 +55,7 @@ class OptimizedCTRegression(nn.Module):
         # CNN branch for local features (optional but recommended)
         if use_cnn_branch:
             self.cnn_branch = EfficientNet3D(
-                in_channels=1,
+                in_channels=voxel_dim,  # FIXED: Accept voxel_dim not 1
                 base_channels=32,
                 feature_dim=voxel_dim
             )
@@ -64,6 +64,9 @@ class OptimizedCTRegression(nn.Module):
                 feature_dim=voxel_dim,
                 num_heads=4
             )
+            
+            # Project X-ray features to voxel_dim for fusion
+            self.xray_to_voxel = nn.Linear(xray_feature_dim, voxel_dim)
         
         # Learnable depth lifting (replaces simple initial volume)
         if use_learnable_priors:
@@ -109,6 +112,10 @@ class OptimizedCTRegression(nn.Module):
         # Encode X-rays
         xray_context, time_xray_cond, xray_features_2d = self.xray_encoder(xrays, dummy_t)
         
+        # Shape assertions for debugging
+        assert xray_features_2d.dim() == 4, f"Expected 4D xray_features_2d, got {xray_features_2d.dim()}D"
+        assert xray_features_2d.shape[0] == batch_size, f"Batch size mismatch: {xray_features_2d.shape[0]} vs {batch_size}"
+        
         # Get pooled features for adaptive conditioning
         pooled_features = xray_context  # (B, 1024) -> downsample to feature_dim
         pooled_features = F.adaptive_avg_pool1d(pooled_features.unsqueeze(-1), 512).squeeze(-1)
@@ -127,8 +134,29 @@ class OptimizedCTRegression(nn.Module):
             aux_info.update(depth_aux)
             
             # Lift to 3D: broadcast features along depth with learned weights
-            xray_features_3d = xray_features_2d.unsqueeze(-1) * depth_weights.unsqueeze(1).permute(0, 1, 4, 2, 3)
-            # (B, C, H, W, 1) * (B, 1, D, H, W) -> (B, C, D, H, W)
+            # depth_weights: (B, H, W, D)
+            # xray_features_2d: (B, C, H', W')
+            B_batch, C_feat, H_feat, W_feat = xray_features_2d.shape
+            _, H_target, W_target, D_target = depth_weights.shape
+            
+            # Interpolate features to match depth_weights spatial resolution if needed
+            if (H_feat, W_feat) != (H_target, W_target):
+                xray_features_2d = F.interpolate(
+                    xray_features_2d,
+                    size=(H_target, W_target),
+                    mode='bilinear',
+                    align_corners=True
+                )
+            
+            # Broadcast: (B, C, H, W, 1) * (B, 1, H, W, D) -> (B, C, H, W, D)
+            xray_features_3d = xray_features_2d.unsqueeze(-1) * depth_weights.unsqueeze(1)
+            
+            # Permute to Conv3d format: (B, C, D, H, W)
+            xray_features_3d = xray_features_3d.permute(0, 1, 4, 2, 3)
+            
+            # Shape assertion
+            assert xray_features_3d.shape == (batch_size, C_feat, D_target, H_target, W_target), \
+                f"3D volume shape mismatch: {xray_features_3d.shape} vs expected ({batch_size}, {C_feat}, {D_target}, {H_target}, {W_target})"
             
             # Project to voxel dim
             x = self.depth_proj(xray_features_3d)
@@ -141,23 +169,25 @@ class OptimizedCTRegression(nn.Module):
             # CNN processes the initial 3D volume
             cnn_features, cnn_pyramid = self.cnn_branch(x)  # (B, voxel_dim, D', H', W')
             
-            # Flatten CNN and prepare ViT input
-            cnn_tokens = cnn_features.flatten(2).transpose(1, 2)  # (B, N_cnn, voxel_dim)
+            # Track CNN output spatial dimensions
+            B_batch, C_cnn, D_cnn, H_cnn, W_cnn = cnn_features.shape
             
             # Prepare ViT context from X-ray features
-            vit_context = xray_features_2d.flatten(2).transpose(1, 2)  # (B, 2*H*W, C)
+            # xray_features_2d: (B, 512, H, W) - already interpolated to match volume
+            vit_context = xray_features_2d.flatten(2).transpose(1, 2)  # (B, H*W, 512)
+            
+            # Project to voxel_dim to match CNN features
+            vit_context = self.xray_to_voxel(vit_context)  # (B, H*W, voxel_dim)
             
             # Fuse CNN and ViT features
             fused_context = self.cnn_vit_fusion(cnn_features, vit_context)
             
-            # ViT processes fused features
-            # Need to reshape fused_context back to 3D
-            N_fused = fused_context.shape[1]
-            D_fused = int(round(N_fused ** (1/3)))
-            fused_3d = fused_context.transpose(1, 2).reshape(batch_size, -1, D_fused, D_fused, D_fused)
+            # Reshape fused_context back to 3D using actual CNN dimensions
+            # fused_context: (B, N_fused, voxel_dim)
+            fused_3d = fused_context.transpose(1, 2).reshape(batch_size, -1, D_cnn, H_cnn, W_cnn)
             
             # Upsample to target resolution if needed
-            if D_fused != D:
+            if (D_cnn, H_cnn, W_cnn) != (D, H, W):
                 fused_3d = F.interpolate(fused_3d, size=(D, H, W), mode='trilinear', align_corners=True)
             
             # Use fused features as input to ViT

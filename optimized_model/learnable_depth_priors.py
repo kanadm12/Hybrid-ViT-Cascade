@@ -207,16 +207,31 @@ class AdaptiveDepthWeightNetwork(nn.Module):
         # Apply region-specific modulation
         region_modulations = []
         for i, modulator in enumerate(self.region_modulators):
+            # Bounds check for safety
+            assert i < region_masks.shape[1], f"Region index {i} exceeds num_regions {region_masks.shape[1]}"
+            
             mod = modulator(xray_features)  # (B, D, H, W)
             
             # Get region mask for this specific region
             # region_masks is (B, num_regions, D)
             region_mask = region_masks[:, i, :]  # (B, D)
             
+            # DEBUG: Print shapes
+            # print(f"DEBUG Region {i}: mod={mod.shape}, region_mask={region_mask.shape}")
+            
             # Reshape to broadcast with spatial dimensions
             # mod: (B, D, H, W)
             # region_mask: (B, D) -> (B, D, 1, 1)
             region_mask = region_mask.unsqueeze(-1).unsqueeze(-1)  # (B, D, 1, 1)
+            
+            # Verify dimensions match
+            if mod.shape[1] != region_mask.shape[1]:
+                raise RuntimeError(
+                    f"Dimension mismatch in region {i}: "
+                    f"mod depth={mod.shape[1]} vs region_mask depth={region_mask.shape[1]}. "
+                    f"Full shapes: mod={mod.shape}, region_mask={region_mask.shape}, "
+                    f"xray_features={xray_features.shape}"
+                )
             
             # Apply mask: element-wise multiplication
             region_mod = mod * region_mask  # (B, D, H, W) * (B, D, 1, 1) -> (B, D, H, W)
