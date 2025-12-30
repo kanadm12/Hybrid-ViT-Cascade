@@ -13,7 +13,7 @@
     
     "training": {
         "num_epochs": 15,
-        "batch_size": 8,
+        "batch_size": 2,
         "learning_rate": 1e-4,
         "weight_decay": 0.01,
         "grad_clip_max_norm": 1.0,

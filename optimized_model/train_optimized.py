@@ -27,6 +27,9 @@ def train_epoch(model, dataloader, criterion, optimizer, scaler, device, epoch, 
     epoch_losses = {'total': 0, 'l1': 0, 'ssim': 0, 'reg': 0}
     num_batches = 0
     
+    # Gradient accumulation to simulate larger batches
+    accumulation_steps = 4  # Effective batch size = 2 * 4 = 8
+    
     start_time = time.time()
     
     for batch_idx, batch in enumerate(dataloader):
@@ -38,8 +41,6 @@ def train_epoch(model, dataloader, criterion, optimizer, scaler, device, epoch, 
             xrays = batch['xrays'].to(device)
             target = batch['ct_volume'].to(device)
         
-        optimizer.zero_grad()
-        
         # Mixed precision training
         with torch.amp.autocast('cuda', enabled=config['optimization']['use_mixed_precision']):
             # Forward pass
@@ -48,22 +49,31 @@ def train_epoch(model, dataloader, criterion, optimizer, scaler, device, epoch, 
             # Compute loss
             loss_dict = criterion(predicted, target, aux_info)
             loss = loss_dict['total_loss']
+            
+            # Scale loss for gradient accumulation
+            loss = loss / accumulation_steps
         
         # Backward pass with gradient scaling
         scaler.scale(loss).backward()
         
-        # Gradient clipping
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(
-            model.parameters(),
-            config['training']['grad_clip_max_norm']
-        )
+        # Only step optimizer every accumulation_steps
+        if (batch_idx + 1) % accumulation_steps == 0:
+            # Gradient clipping
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                config['training']['grad_clip_max_norm']
+            )
+            
+            # Optimizer step
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+            
+            # Clear cache to free memory
+            torch.cuda.empty_cache()
         
-        # Optimizer step
-        scaler.step(optimizer)
-        scaler.update()
-        
-        # Accumulate losses
+        # Accumulate losses (multiply back by accumulation_steps for logging)
         epoch_losses['total'] += loss_dict['total_loss'].item()
         epoch_losses['l1'] += loss_dict['l1_loss'].item()
         epoch_losses['ssim'] += loss_dict['ssim_loss'].item()
