@@ -27,7 +27,7 @@
     },
     
     "data": {
-        "dataset_path": "/workspace/CTRecon/data",
+        "dataset_path": "/workspace/drr_patient_data",
         "max_patients": 1000,
         "num_workers": 4,
         "prefetch_factor": 2

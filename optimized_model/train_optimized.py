@@ -18,7 +18,7 @@ import numpy as np
 sys.path.insert(0, '..')
 
 from model_optimized import OptimizedCTRegression, OptimizedRegressionLoss
-from utils.dataset import CTReconDataset
+from utils.dataset import PatientDRRDataset
 
 
 def train_epoch(model, dataloader, criterion, optimizer, scaler, device, epoch, config):
@@ -30,8 +30,13 @@ def train_epoch(model, dataloader, criterion, optimizer, scaler, device, epoch, 
     start_time = time.time()
     
     for batch_idx, batch in enumerate(dataloader):
-        xrays = batch['xrays'].to(device)
-        target = batch['ct_volume'].to(device)
+        # Handle dict format from PatientDRRDataset
+        if isinstance(batch, dict):
+            xrays = batch['drr_stacked'].to(device)  # (B, 2, 1, 512, 512)
+            target = batch['ct_volume'].to(device)
+        else:
+            xrays = batch['xrays'].to(device)
+            target = batch['ct_volume'].to(device)
         
         optimizer.zero_grad()
         
@@ -98,8 +103,13 @@ def validate(model, dataloader, criterion, device):
     
     with torch.no_grad():
         for batch in dataloader:
-            xrays = batch['xrays'].to(device)
-            target = batch['ct_volume'].to(device)
+            # Handle dict format from PatientDRRDataset
+            if isinstance(batch, dict):
+                xrays = batch['drr_stacked'].to(device)  # (B, 2, 1, 512, 512)
+                target = batch['ct_volume'].to(device)
+            else:
+                xrays = batch['xrays'].to(device)
+                target = batch['ct_volume'].to(device)
             
             # Forward pass
             predicted, aux_info = model(xrays)
@@ -350,15 +360,17 @@ def main():
     
     # Create datasets
     print("\n=== Loading Dataset ===")
-    train_dataset = CTReconDataset(
-        data_dir=config['data']['dataset_path'],
-        split='train',
+    train_dataset = PatientDRRDataset(
+        data_path=config['data']['dataset_path'],
+        target_xray_size=512,
+        target_volume_size=(64, 64, 64),
         max_patients=config['data']['max_patients']
     )
     
-    val_dataset = CTReconDataset(
-        data_dir=config['data']['dataset_path'],
-        split='val',
+    val_dataset = PatientDRRDataset(
+        data_path=config['data']['dataset_path'],
+        target_xray_size=512,
+        target_volume_size=(64, 64, 64),
         max_patients=100  # Smaller validation set
     )
     
