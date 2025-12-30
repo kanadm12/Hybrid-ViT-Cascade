@@ -21,13 +21,22 @@ from utils.dataset import PatientDRRDataset
 
 def load_model(checkpoint_path, device):
     """Load trained model from checkpoint"""
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
     # Get config from checkpoint
-    config = checkpoint.get('config', None)
-    if config is None:
+    full_config = checkpoint.get('config', None)
+    
+    # Extract model config (handle both nested and flat config structures)
+    if full_config is not None:
+        if 'model' in full_config:
+            # Nested config structure (expected)
+            model_config = full_config['model']
+        else:
+            # Flat config structure (fallback)
+            model_config = full_config
+    else:
         # Default config if not saved in checkpoint
-        config = {
+        model_config = {
             'volume_size': (64, 64, 64),
             'xray_img_size': 512,
             'voxel_dim': 256,
@@ -38,12 +47,12 @@ def load_model(checkpoint_path, device):
     
     # Create model
     model = DirectCTRegression(
-        volume_size=tuple(config['volume_size']),
-        xray_img_size=config['xray_img_size'],
-        voxel_dim=config['voxel_dim'],
-        vit_depth=config['vit_depth'],
-        num_heads=config['num_heads'],
-        xray_feature_dim=config['xray_feature_dim']
+        volume_size=tuple(model_config['volume_size']),
+        xray_img_size=model_config['xray_img_size'],
+        voxel_dim=model_config['voxel_dim'],
+        vit_depth=model_config['vit_depth'],
+        num_heads=model_config['num_heads'],
+        xray_feature_dim=model_config['xray_feature_dim']
     ).to(device)
     
     # Load weights
@@ -54,7 +63,7 @@ def load_model(checkpoint_path, device):
     if 'psnr' in checkpoint:
         print(f"Best PSNR: {checkpoint['psnr']:.2f} dB")
     
-    return model, config
+    return model, model_config
 
 
 def compute_metrics(pred, target):
