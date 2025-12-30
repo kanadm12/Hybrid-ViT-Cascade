@@ -27,26 +27,26 @@ class MBConvBlock(nn.Module):
         self.use_residual = (stride == 1 and in_channels == out_channels)
         hidden_dim = in_channels * expand_ratio
         
-        layers = []
-        
         # Expansion phase
         if expand_ratio != 1:
-            layers.extend([
+            self.expand_conv = nn.Sequential(
                 nn.Conv3d(in_channels, hidden_dim, 1, bias=False),
                 nn.BatchNorm3d(hidden_dim),
                 nn.SiLU(inplace=True)
-            ])
+            )
+        else:
+            self.expand_conv = nn.Identity()
         
         # Depthwise convolution
-        layers.extend([
+        self.depthwise_conv = nn.Sequential(
             nn.Conv3d(hidden_dim, hidden_dim, kernel_size, stride=stride,
                      padding=kernel_size // 2, groups=hidden_dim, bias=False),
             nn.BatchNorm3d(hidden_dim),
             nn.SiLU(inplace=True)
-        ])
+        )
         
         # Squeeze-and-Excitation
-        se_channels = max(1, int(in_channels * se_ratio))
+        se_channels = max(1, int(hidden_dim * se_ratio))
         self.se = nn.Sequential(
             nn.AdaptiveAvgPool3d(1),
             nn.Conv3d(hidden_dim, se_channels, 1),
@@ -56,22 +56,29 @@ class MBConvBlock(nn.Module):
         )
         
         # Projection phase
-        layers.extend([
+        self.project_conv = nn.Sequential(
             nn.Conv3d(hidden_dim, out_channels, 1, bias=False),
             nn.BatchNorm3d(out_channels)
-        ])
-        
-        self.conv = nn.Sequential(*layers)
+        )
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.conv(x)
+        identity = x
         
-        # Apply SE
+        # Expansion
+        out = self.expand_conv(x)
+        
+        # Depthwise
+        out = self.depthwise_conv(out)
+        
+        # SE
         out = out * self.se(out)
+        
+        # Projection
+        out = self.project_conv(out)
         
         # Residual connection
         if self.use_residual:
-            out = out + x
+            out = out + identity
         
         return out
 

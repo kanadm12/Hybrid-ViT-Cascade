@@ -117,8 +117,8 @@ class OptimizedCTRegression(nn.Module):
         assert xray_features_2d.shape[0] == batch_size, f"Batch size mismatch: {xray_features_2d.shape[0]} vs {batch_size}"
         
         # Get pooled features for adaptive conditioning
-        pooled_features = xray_context  # (B, 1024) -> downsample to feature_dim
-        pooled_features = F.adaptive_avg_pool1d(pooled_features.unsqueeze(-1), 512).squeeze(-1)
+        # xray_context: (B, 1024) -> downsample to (B, 512)
+        pooled_features = F.adaptive_avg_pool1d(xray_context.unsqueeze(1), 512).squeeze(1)
         
         aux_info = {}
         
