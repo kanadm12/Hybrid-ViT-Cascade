@@ -210,9 +210,13 @@ class AdaptiveDepthWeightNetwork(nn.Module):
             mod = modulator(xray_features)  # (B, D, H, W)
             
             # Weight by region mask
-            region_mask = region_masks[:, i:i+1, :].unsqueeze(-1).unsqueeze(-1)  # (B, 1, D, 1, 1)
-            region_mod = mod.unsqueeze(2) * region_mask  # (B, D, D, H, W)
-            region_modulations.append(region_mod.sum(dim=2))  # (B, D, H, W)
+            # region_mask: (B, 1, D) -> expand to match spatial dims
+            region_mask = region_masks[:, i:i+1, :]  # (B, 1, D)
+            region_mask = region_mask.unsqueeze(-1).unsqueeze(-1)  # (B, 1, D, 1, 1)
+            
+            # Apply mask: mod is (B, D, H, W), need to weight each depth channel
+            region_mod = mod * region_mask.squeeze(1)  # (B, D, H, W) * (B, D, 1, 1) -> (B, D, H, W)
+            region_modulations.append(region_mod)  # (B, D, H, W)
         
         # Combine region modulations
         combined_modulation = sum(region_modulations)  # (B, D, H, W)
