@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Direct Regression Training
+# Start Direct Regression Training - Single GPU
 # This tests if the architecture can learn WITHOUT diffusion
 
 set -e
@@ -21,8 +21,8 @@ echo ""
 echo "If PSNR stays <15 dB: Architecture is broken"
 echo "If PSNR >20 dB: Diffusion was the problem"
 echo ""
-echo "Training on 4 GPUs, 10 epochs (~10 minutes)"
+echo "Training on 1 GPU, 10 epochs (~30 minutes)"
 echo "=========================================="
 echo ""
 
-torchrun --nproc_per_node=4 train_direct.py --config config_direct.json
+python3 train_direct.py --config config_direct.json

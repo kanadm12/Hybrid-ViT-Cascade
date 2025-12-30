@@ -1,12 +1,10 @@
 """
-Training script for direct CT regression (no diffusion)
+Training script for direct CT regression (no diffusion) - Single GPU
 """
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 import json
 import argparse
@@ -21,21 +19,6 @@ from model_direct import DirectCTRegression, DirectRegressionLoss
 from utils.dataset import PatientDRRDataset
 
 
-def setup_distributed():
-    """Initialize distributed training"""
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        rank = int(os.environ['RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
-        local_rank = int(os.environ['LOCAL_RANK'])
-        
-        dist.init_process_group('nccl')
-        torch.cuda.set_device(local_rank)
-        
-        return True, rank, local_rank, world_size
-    else:
-        return False, 0, 0, 1
-
-
 def compute_psnr(pred, target):
     """Compute PSNR between predicted and target volumes"""
     mse = torch.mean((pred - target) ** 2)
@@ -45,17 +28,14 @@ def compute_psnr(pred, target):
     return psnr.item()
 
 
-def train_epoch(model, train_loader, optimizer, loss_fn, scaler, device, is_distributed, is_main_process):
+def train_epoch(model, train_loader, optimizer, loss_fn, scaler, device):
     """Train for one epoch"""
     model.train()
     total_loss = 0
     total_l1 = 0
     total_ssim = 0
     
-    if is_main_process:
-        pbar = tqdm(train_loader, desc="Training")
-    else:
-        pbar = train_loader
+    pbar = tqdm(train_loader, desc="Training")
     
     for batch_data in pbar:
         if isinstance(batch_data, dict):
@@ -83,17 +63,16 @@ def train_epoch(model, train_loader, optimizer, loss_fn, scaler, device, is_dist
         total_l1 += loss_dict['l1_loss'].item()
         total_ssim += loss_dict['ssim_loss'].item()
         
-        if is_main_process:
-            pbar.set_postfix({
-                'loss': f"{loss.item():.4f}",
-                'l1': f"{loss_dict['l1_loss'].item():.4f}"
-            })
+        pbar.set_postfix({
+            'loss': f"{loss.item():.4f}",
+            'l1': f"{loss_dict['l1_loss'].item():.4f}"
+        })
     
     n = len(train_loader)
     return total_loss / n, total_l1 / n, total_ssim / n
 
 
-def validate(model, val_loader, loss_fn, device, is_main_process):
+def validate(model, val_loader, loss_fn, device):
     """Validate the model"""
     model.eval()
     total_loss = 0
@@ -136,18 +115,11 @@ def main():
     with open(args.config) as f:
         config = json.load(f)
     
-    # Setup distributed
-    is_distributed, rank, local_rank, world_size = setup_distributed()
-    is_main_process = rank == 0
-    device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
-    if is_main_process:
-        print("=" * 80)
-        print("DIRECT CT REGRESSION (NO DIFFUSION)")
-        print("=" * 80)
-        print(f"Distributed: {is_distributed}")
-        print(f"World size: {world_size}")
-        print(f"Rank: {rank}")
+    print("=" * 80)
+    print("DIRECT CT REGRESSION (NO DIFFUSION) - Single GPU")
+    print("=" * 80)
     
     # Create datasets
     train_dataset = PatientDRRDataset(
@@ -165,18 +137,10 @@ def main():
     )
     
     # Create dataloaders
-    if is_distributed:
-        train_sampler = DistributedSampler(train_dataset, shuffle=True)
-        val_sampler = DistributedSampler(val_dataset, shuffle=False)
-    else:
-        train_sampler = None
-        val_sampler = None
-    
     train_loader = DataLoader(
         train_dataset,
         batch_size=config['training']['batch_size'],
-        sampler=train_sampler,
-        shuffle=(train_sampler is None),
+        shuffle=True,
         num_workers=config['data']['num_workers'],
         pin_memory=True
     )
@@ -184,7 +148,6 @@ def main():
     val_loader = DataLoader(
         val_dataset,
         batch_size=config['training']['batch_size'],
-        sampler=val_sampler,
         shuffle=False,
         num_workers=config['data']['num_workers'],
         pin_memory=True
@@ -193,13 +156,8 @@ def main():
     # Create model
     model = DirectCTRegression(**config['model']).to(device)
     
-    if is_main_process:
-        total_params = sum(p.numel() for p in model.parameters())
-        print(f"\nModel parameters: {total_params:,}")
-    
-    # Wrap with DDP
-    if is_distributed:
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"\nModel parameters: {total_params:,}")
     
     # Loss and optimizer
     loss_fn = DirectRegressionLoss(
@@ -216,49 +174,40 @@ def main():
     scaler = GradScaler()
     
     # Create checkpoint dir
-    if is_main_process:
-        os.makedirs(config['checkpoints']['save_dir'], exist_ok=True)
+    os.makedirs(config['checkpoints']['save_dir'], exist_ok=True)
     
     # Training loop
     best_psnr = 0
     
     for epoch in range(config['training']['num_epochs']):
-        if is_distributed:
-            train_sampler.set_epoch(epoch)
-        
         # Train
         train_loss, train_l1, train_ssim = train_epoch(
-            model, train_loader, optimizer, loss_fn, scaler, device, is_distributed, is_main_process
+            model, train_loader, optimizer, loss_fn, scaler, device
         )
         
         # Validate
-        val_loss, val_psnr = validate(model, val_loader, loss_fn, device, is_main_process)
+        val_loss, val_psnr = validate(model, val_loader, loss_fn, device)
         
-        if is_main_process:
-            print(f"\nEpoch {epoch+1}/{config['training']['num_epochs']}:")
-            print(f"  Train - Loss: {train_loss:.4f}, L1: {train_l1:.4f}, SSIM: {train_ssim:.4f}")
-            print(f"  Val   - Loss: {val_loss:.4f}, PSNR: {val_psnr:.2f} dB")
-            
-            # Save checkpoint
-            if val_psnr > best_psnr:
-                best_psnr = val_psnr
-                checkpoint = {
-                    'epoch': epoch,
-                    'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'psnr': val_psnr,
-                    'config': config
-                }
-                torch.save(checkpoint, os.path.join(config['checkpoints']['save_dir'], 'best_model.pt'))
-                print(f"  ✓ Saved best model (PSNR: {val_psnr:.2f} dB)")
+        print(f"\nEpoch {epoch+1}/{config['training']['num_epochs']}:")
+        print(f"  Train - Loss: {train_loss:.4f}, L1: {train_l1:.4f}, SSIM: {train_ssim:.4f}")
+        print(f"  Val   - Loss: {val_loss:.4f}, PSNR: {val_psnr:.2f} dB")
+        
+        # Save checkpoint
+        if val_psnr > best_psnr:
+            best_psnr = val_psnr
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'psnr': val_psnr,
+                'config': config
+            }
+            torch.save(checkpoint, os.path.join(config['checkpoints']['save_dir'], 'best_model.pt'))
+            print(f"  ✓ Saved best model (PSNR: {val_psnr:.2f} dB)")
     
-    if is_main_process:
-        print(f"\n{'='*80}")
-        print(f"Training complete! Best PSNR: {best_psnr:.2f} dB")
-        print(f"{'='*80}")
-    
-    if is_distributed:
-        dist.destroy_process_group()
+    print(f"\n{'='*80}")
+    print(f"Training complete! Best PSNR: {best_psnr:.2f} dB")
+    print(f"{'='*80}")
 
 
 if __name__ == "__main__":
