@@ -16,7 +16,7 @@ matplotlib.use('Agg')
 sys.path.insert(0, '..')
 
 from model_direct import DirectCTRegression
-from utils.dataset import CTReconDataset
+from utils.dataset import PatientDRRDataset
 
 
 def load_model(checkpoint_path, device):
@@ -333,9 +333,10 @@ def main():
     
     # Create dataset
     print(f"\nLoading {args.split} dataset from {args.data_dir}")
-    dataset = CTReconDataset(
-        data_dir=args.data_dir,
-        split=args.split,
+    dataset = PatientDRRDataset(
+        data_path=args.data_dir,
+        target_xray_size=512,
+        target_volume_size=(64, 64, 64),
         max_patients=None  # Load all available
     )
     
