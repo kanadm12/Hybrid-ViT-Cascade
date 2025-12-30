@@ -235,27 +235,64 @@ def visualize_results(xrays, predicted, target, metrics, save_path):
     print(f"  ✓ Saved visualization to {save_path}")
 
 
-def save_volume_nifti(volume, save_path):
-    """Save volume as NIfTI file (requires nibabel)"""
+def save_volume_nifti(volume, save_path, target_size=None):
+    """
+    Save volume as NIfTI file (requires nibabel)
+    
+    Args:
+        volume: (B, 1, D, H, W) tensor
+        save_path: Path to save NIfTI file
+        target_size: Tuple (D, H, W) to upscale to, or None for native resolution
+    """
     try:
         import nibabel as nib
         volume_np = volume[0, 0].cpu().numpy()  # (D, H, W)
-        nifti_img = nib.Nifti1Image(volume_np, affine=np.eye(4))
+        
+        # Upscale if target size specified
+        if target_size is not None:
+            print(f"  ⚙ Upscaling from {volume_np.shape} to {target_size}...")
+            volume_tensor = torch.from_numpy(volume_np).unsqueeze(0).unsqueeze(0)  # (1, 1, D, H, W)
+            volume_upscaled = F.interpolate(
+                volume_tensor,
+                size=target_size,
+                mode='trilinear',
+                align_corners=True
+            )
+            volume_np = volume_upscaled[0, 0].numpy()
+        
+        # Create NIfTI with proper voxel spacing
+        voxel_size = np.array([1.0, 1.0, 1.0])  # 1mm isotropic (adjust if needed)
+        affine = np.diag([voxel_size[0], voxel_size[1], voxel_size[2], 1.0])
+        
+        nifti_img = nib.Nifti1Image(volume_np, affine=affine)
         nib.save(nifti_img, save_path)
-        print(f"  ✓ Saved NIfTI volume to {save_path}")
+        
+        # Calculate file size
+        file_size_mb = save_path.stat().st_size / (1024 * 1024)
+        print(f"  ✓ Saved NIfTI volume: {volume_np.shape} ({file_size_mb:.1f} MB)")
+        
     except ImportError:
         print("  ! nibabel not installed, skipping NIfTI save")
         print("    Install with: pip install nibabel")
 
 
-def run_inference(model, dataloader, device, output_dir, max_samples=None):
-    """Run inference on dataset"""
+def run_inference(model, dataloader, device, output_dir, max_samples=None, upscale_size=None):
+    """
+    Run inference on dataset
+    
+    Args:
+        upscale_size: Tuple (D, H, W) to upscale output volumes to, or None for native 64x64x64
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
     
     all_metrics = []
     
     print("\n=== Running Inference ===")
+    if upscale_size:
+        print(f"Upscaling output volumes to: {upscale_size}")
+    else:
+        print("Using native model resolution: (64, 64, 64)")
     
     with torch.no_grad():
         for idx, batch in enumerate(dataloader):
@@ -293,11 +330,21 @@ def run_inference(model, dataloader, device, output_dir, max_samples=None):
             # Save predicted volume as numpy
             np_path = output_dir / f'sample_{idx+1:03d}_predicted.npy'
             np.save(np_path, predicted[0, 0].cpu().numpy())
-            print(f"  ✓ Saved numpy array to {np_path}")
+            print(f"  ✓ Saved numpy array (native): {np_path}")
             
-            # Save as NIfTI if available
-            nifti_path = output_dir / f'sample_{idx+1:03d}_predicted.nii.gz'
-            save_volume_nifti(predicted, nifti_path)
+            # Save as NIfTI - both native and upscaled if requested
+            if upscale_size:
+                # Save upscaled version
+                nifti_path_hires = output_dir / f'sample_{idx+1:03d}_predicted_hires.nii.gz'
+                save_volume_nifti(predicted, nifti_path_hires, target_size=upscale_size)
+                
+                # Also save native resolution for comparison
+                nifti_path_native = output_dir / f'sample_{idx+1:03d}_predicted_native.nii.gz'
+                save_volume_nifti(predicted, nifti_path_native, target_size=None)
+            else:
+                # Save native resolution only
+                nifti_path = output_dir / f'sample_{idx+1:03d}_predicted.nii.gz'
+                save_volume_nifti(predicted, nifti_path, target_size=None)
     
     # Print average metrics
     if all_metrics:
@@ -329,8 +376,23 @@ def main():
                        help='Maximum number of samples to process')
     parser.add_argument('--batch_size', type=int, default=1,
                        help='Batch size (recommended: 1 for inference)')
+    parser.add_argument('--upscale', type=str, default=None,
+                       help='Upscale output to higher resolution, e.g., "256,256,256" or "512,512,512"')
     
     args = parser.parse_args()
+    
+    # Parse upscale size
+    upscale_size = None
+    if args.upscale:
+        try:
+            upscale_size = tuple(map(int, args.upscale.split(',')))
+            if len(upscale_size) != 3:
+                raise ValueError
+            print(f"\n⚙ Upscaling enabled: {upscale_size}")
+        except:
+            print(f"\n⚠ Invalid upscale format '{args.upscale}', expected 'D,H,W' (e.g., '256,256,256')")
+            print("Using native resolution (64, 64, 64)")
+            upscale_size = None
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -360,7 +422,7 @@ def main():
     print(f"Found {len(dataset)} samples")
     
     # Run inference
-    run_inference(model, dataloader, device, args.output_dir, args.max_samples)
+    run_inference(model, dataloader, device, args.output_dir, args.max_samples, upscale_size)
     
     print(f"\n✓ Inference complete! Results saved to {args.output_dir}/")
 
