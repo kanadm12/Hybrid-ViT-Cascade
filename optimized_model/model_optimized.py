@@ -118,19 +118,16 @@ class OptimizedCTRegression(nn.Module):
         # Generate initial 3D volume using learnable depth priors
         if self.use_learnable_priors:
             # Lift 2D X-ray features to 3D using learned depth distributions
-            # xray_features_2d: (B, 2, C, H, W) from 2 views
-            
-            # Average features from both views
-            xray_features_avg = xray_features_2d.mean(dim=1)  # (B, C, H, W)
+            # xray_features_2d: (B, embed_dim, H', W') - already averaged across views by encoder
             
             # Get depth weights and auxiliary info (boundaries, uncertainties)
-            depth_weights, depth_aux = self.depth_lifter(xray_features_avg, pooled_features)
+            depth_weights, depth_aux = self.depth_lifter(xray_features_2d, pooled_features)
             # depth_weights: (B, H, W, D)
             
             aux_info.update(depth_aux)
             
             # Lift to 3D: broadcast features along depth with learned weights
-            xray_features_3d = xray_features_avg.unsqueeze(-1) * depth_weights.unsqueeze(1).permute(0, 1, 4, 2, 3)
+            xray_features_3d = xray_features_2d.unsqueeze(-1) * depth_weights.unsqueeze(1).permute(0, 1, 4, 2, 3)
             # (B, C, H, W, 1) * (B, 1, D, H, W) -> (B, C, D, H, W)
             
             # Project to voxel dim

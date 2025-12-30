@@ -41,7 +41,7 @@ def train_epoch(model, dataloader, criterion, optimizer, scaler, device, epoch, 
         optimizer.zero_grad()
         
         # Mixed precision training
-        with torch.cuda.amp.autocast(enabled=config['optimization']['use_mixed_precision']):
+        with torch.amp.autocast('cuda', enabled=config['optimization']['use_mixed_precision']):
             # Forward pass
             predicted, aux_info = model(xrays)
             
