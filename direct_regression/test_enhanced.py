@@ -81,7 +81,7 @@ def test_enhanced_model():
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
     xrays = torch.randn(batch_size, 2, 512, 512).cuda()
-    target = torch.randn(batch_size, 64, 64, 64).cuda()
+    target = torch.randn(batch_size, 1, 64, 64, 64).cuda()  # Add channel dim
     
     predicted, aux_outputs = model(xrays)
     loss_dict = criterion(predicted, target, aux_outputs)

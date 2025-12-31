@@ -191,17 +191,22 @@ class EnhancedDirectModel(nn.Module):
     def forward(self, xrays: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         """
         Args:
-            xrays: (B, num_views, C, H, W)
+            xrays: (B, num_views, H, W) or (B, num_views, C, H, W)
         Returns:
             final_output: (B, 1, D, H, W)
             aux_outputs: Dict with multi-scale outputs
         """
+        # Handle both (B, num_views, H, W) and (B, num_views, C, H, W)
+        if xrays.dim() == 4:
+            # Add channel dimension: (B, num_views, H, W) -> (B, num_views, 1, H, W)
+            xrays = xrays.unsqueeze(2)
+        
         B, num_views = xrays.shape[:2]
         
         # Encode each view
         view_features = []
         for v in range(num_views):
-            feat = self.xray_encoder(xrays[:, v])
+            feat = self.xray_encoder(xrays[:, v])  # (B, 1, H, W) -> features
             view_features.append(feat)
         
         # Fuse views (average)
