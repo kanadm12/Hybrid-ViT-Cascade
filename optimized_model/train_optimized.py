@@ -169,168 +169,168 @@ def visualize_feature_maps(model, sample_batch, epoch, save_dir='visualizations'
         with torch.no_grad():
             # Handle dict format from PatientDRRDataset
             if isinstance(sample_batch, dict):
-            xrays = sample_batch['drr_stacked']  # (B, 2, 1, 512, 512)
-            target = sample_batch['ct_volume']
-        else:
-            xrays = sample_batch['xrays']
-            target = sample_batch['ct_volume']
-        
-        # Forward pass with feature extraction
-        batch_size = xrays.shape[0]
-        dummy_t = torch.zeros(batch_size, 256, device=xrays.device)
-        
-        # Get X-ray features
-        xray_context, time_xray_cond, xray_features_2d = model.xray_encoder(xrays, dummy_t)
-        
-        # Create visualization figure
-        fig = plt.figure(figsize=(20, 12))
-        
-        # Plot input X-rays
-        ax1 = plt.subplot(3, 5, 1)
-        xray_ap = xrays[0, 0, 0].cpu().numpy()
-        ax1.imshow(xray_ap, cmap='gray')
-        ax1.set_title(f'Epoch {epoch}: Input X-ray (AP)')
-        ax1.axis('off')
-        
-        ax2 = plt.subplot(3, 5, 2)
-        xray_lat = xrays[0, 1, 0].cpu().numpy()
-        ax2.imshow(xray_lat, cmap='gray')
-        ax2.set_title('Input X-ray (Lateral)')
-        ax2.axis('off')
-        
-        # Plot X-ray encoder features (averaged across channels)
-        ax3 = plt.subplot(3, 5, 3)
-        xray_feat = xray_features_2d[0].mean(dim=0).cpu().numpy()  # (C, H, W) -> (H, W)
-        im3 = ax3.imshow(xray_feat, cmap='viridis')
-        ax3.set_title('X-ray Features (Avg)')
-        ax3.axis('off')
-        plt.colorbar(im3, ax=ax3, fraction=0.046)
-        
-        # Plot first channel of X-ray features
-        ax4 = plt.subplot(3, 5, 4)
-        xray_feat_ch0 = xray_features_2d[0, 0].cpu().numpy()  # First channel (H, W)
-        im4 = ax4.imshow(xray_feat_ch0, cmap='viridis')
-        ax4.set_title('X-ray Features (Ch 0)')
-        ax4.axis('off')
-        plt.colorbar(im4, ax=ax4, fraction=0.046)
-        
-        # If using learnable priors, visualize depth weights
-        if model.use_learnable_priors:
-            pooled_features = F.adaptive_avg_pool1d(xray_context.unsqueeze(1), 512).squeeze(1)
-            # Don't average - keep full features for depth_lifter which expects (B, C, H, W)
-            depth_weights, depth_aux = model.depth_lifter(xray_features_2d, pooled_features)
+                xrays = sample_batch['drr_stacked']  # (B, 2, 1, 512, 512)
+                target = sample_batch['ct_volume']
+            else:
+                xrays = sample_batch['xrays']
+                target = sample_batch['ct_volume']
             
-            # Plot depth distribution for center pixel
-            ax5 = plt.subplot(3, 5, 5)
-            H, W = depth_weights.shape[1:3]
-            center_depth = depth_weights[0, H//2, W//2].cpu().numpy()
-            ax5.plot(center_depth)
-            ax5.set_title('Depth Distribution (Center)')
-            ax5.set_xlabel('Depth Index')
-            ax5.set_ylabel('Weight')
-            ax5.grid(True, alpha=0.3)
+            # Forward pass with feature extraction
+            batch_size = xrays.shape[0]
+            dummy_t = torch.zeros(batch_size, 256, device=xrays.device)
             
-            # Plot learned boundaries
-            if 'boundaries' in depth_aux:
-                boundaries = depth_aux['boundaries'][0].cpu().numpy() * len(center_depth)
-                for b in boundaries:
-                    ax5.axvline(b, color='r', linestyle='--', alpha=0.5)
+            # Get X-ray features
+            xray_context, time_xray_cond, xray_features_2d = model.xray_encoder(xrays, dummy_t)
             
-            # Plot depth weight heatmap (middle slice)
-            ax6 = plt.subplot(3, 5, 6)
-            depth_mid = depth_weights.shape[-1] // 2
-            depth_slice = depth_weights[0, :, :, depth_mid].cpu().numpy()
-            im6 = ax6.imshow(depth_slice, cmap='hot')
-            ax6.set_title(f'Depth Weights (Slice {depth_mid})')
-            ax6.axis('off')
-            plt.colorbar(im6, ax=ax6, fraction=0.046)
-        
-        # Get model prediction
-        predicted, aux_info = model(xrays)
-        
-        # Plot predicted CT slices (axial, sagittal, coronal)
-        D, H, W = predicted.shape[2:]
-        
-        ax7 = plt.subplot(3, 5, 7)
-        pred_axial = predicted[0, 0, D//2].cpu().numpy()
-        im7 = ax7.imshow(pred_axial, cmap='gray', vmin=-1, vmax=1)
-        ax7.set_title('Predicted CT (Axial)')
-        ax7.axis('off')
-        plt.colorbar(im7, ax=ax7, fraction=0.046)
-        
-        ax8 = plt.subplot(3, 5, 8)
-        pred_sagittal = predicted[0, 0, :, H//2, :].cpu().numpy()
-        im8 = ax8.imshow(pred_sagittal, cmap='gray', vmin=-1, vmax=1)
-        ax8.set_title('Predicted CT (Sagittal)')
-        ax8.axis('off')
-        plt.colorbar(im8, ax=ax8, fraction=0.046)
-        
-        ax9 = plt.subplot(3, 5, 9)
-        pred_coronal = predicted[0, 0, :, :, W//2].cpu().numpy()
-        im9 = ax9.imshow(pred_coronal, cmap='gray', vmin=-1, vmax=1)
-        ax9.set_title('Predicted CT (Coronal)')
-        ax9.axis('off')
-        plt.colorbar(im9, ax=ax9, fraction=0.046)
-        
-        # Plot target CT slices
-        ax10 = plt.subplot(3, 5, 10)
-        target_axial = target[0, 0, D//2].cpu().numpy()
-        im10 = ax10.imshow(target_axial, cmap='gray', vmin=-1, vmax=1)
-        ax10.set_title('Target CT (Axial)')
-        ax10.axis('off')
-        plt.colorbar(im10, ax=ax10, fraction=0.046)
-        
-        ax11 = plt.subplot(3, 5, 11)
-        target_sagittal = target[0, 0, :, H//2, :].cpu().numpy()
-        im11 = ax11.imshow(target_sagittal, cmap='gray', vmin=-1, vmax=1)
-        ax11.set_title('Target CT (Sagittal)')
-        ax11.axis('off')
-        plt.colorbar(im11, ax=ax11, fraction=0.046)
-        
-        ax12 = plt.subplot(3, 5, 12)
-        target_coronal = target[0, 0, :, :, W//2].cpu().numpy()
-        im12 = ax12.imshow(target_coronal, cmap='gray', vmin=-1, vmax=1)
-        ax12.set_title('Target CT (Coronal)')
-        ax12.axis('off')
-        plt.colorbar(im12, ax=ax12, fraction=0.046)
-        
-        # Plot error maps
-        error = torch.abs(predicted - target)
-        
-        ax13 = plt.subplot(3, 5, 13)
-        error_axial = error[0, 0, D//2].cpu().numpy()
-        im13 = ax13.imshow(error_axial, cmap='hot', vmin=0, vmax=0.5)
-        ax13.set_title('Error Map (Axial)')
-        ax13.axis('off')
-        plt.colorbar(im13, ax=ax13, fraction=0.046)
-        
-        ax14 = plt.subplot(3, 5, 14)
-        error_sagittal = error[0, 0, :, H//2, :].cpu().numpy()
-        im14 = ax14.imshow(error_sagittal, cmap='hot', vmin=0, vmax=0.5)
-        ax14.set_title('Error Map (Sagittal)')
-        ax14.axis('off')
-        plt.colorbar(im14, ax=ax14, fraction=0.046)
-        
-        ax15 = plt.subplot(3, 5, 15)
-        error_coronal = error[0, 0, :, :, W//2].cpu().numpy()
-        im15 = ax15.imshow(error_coronal, cmap='hot', vmin=0, vmax=0.5)
-        ax15.set_title('Error Map (Coronal)')
-        ax15.axis('off')
-        plt.colorbar(im15, ax=ax15, fraction=0.046)
-        
-        # Compute metrics
-        psnr = compute_psnr(predicted, target)
-        
-        plt.suptitle(f'Epoch {epoch} - Feature Maps & Predictions (PSNR: {psnr:.2f} dB)', 
-                    fontsize=16, fontweight='bold')
-        plt.tight_layout()
-        
-        # Save figure
-        save_path = Path(save_dir) / f'epoch_{epoch:03d}_features.png'
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print(f"  ✓ Saved feature maps to {save_path}")
+            # Create visualization figure
+            fig = plt.figure(figsize=(20, 12))
+            
+            # Plot input X-rays
+            ax1 = plt.subplot(3, 5, 1)
+            xray_ap = xrays[0, 0, 0].cpu().numpy()
+            ax1.imshow(xray_ap, cmap='gray')
+            ax1.set_title(f'Epoch {epoch}: Input X-ray (AP)')
+            ax1.axis('off')
+            
+            ax2 = plt.subplot(3, 5, 2)
+            xray_lat = xrays[0, 1, 0].cpu().numpy()
+            ax2.imshow(xray_lat, cmap='gray')
+            ax2.set_title('Input X-ray (Lateral)')
+            ax2.axis('off')
+            
+            # Plot X-ray encoder features (averaged across channels)
+            ax3 = plt.subplot(3, 5, 3)
+            xray_feat = xray_features_2d[0].mean(dim=0).cpu().numpy()  # (C, H, W) -> (H, W)
+            im3 = ax3.imshow(xray_feat, cmap='viridis')
+            ax3.set_title('X-ray Features (Avg)')
+            ax3.axis('off')
+            plt.colorbar(im3, ax=ax3, fraction=0.046)
+            
+            # Plot first channel of X-ray features
+            ax4 = plt.subplot(3, 5, 4)
+            xray_feat_ch0 = xray_features_2d[0, 0].cpu().numpy()  # First channel (H, W)
+            im4 = ax4.imshow(xray_feat_ch0, cmap='viridis')
+            ax4.set_title('X-ray Features (Ch 0)')
+            ax4.axis('off')
+            plt.colorbar(im4, ax=ax4, fraction=0.046)
+            
+            # If using learnable priors, visualize depth weights
+            if model.use_learnable_priors:
+                pooled_features = F.adaptive_avg_pool1d(xray_context.unsqueeze(1), 512).squeeze(1)
+                # Don't average - keep full features for depth_lifter which expects (B, C, H, W)
+                depth_weights, depth_aux = model.depth_lifter(xray_features_2d, pooled_features)
+                
+                # Plot depth distribution for center pixel
+                ax5 = plt.subplot(3, 5, 5)
+                H, W = depth_weights.shape[1:3]
+                center_depth = depth_weights[0, H//2, W//2].cpu().numpy()
+                ax5.plot(center_depth)
+                ax5.set_title('Depth Distribution (Center)')
+                ax5.set_xlabel('Depth Index')
+                ax5.set_ylabel('Weight')
+                ax5.grid(True, alpha=0.3)
+                
+                # Plot learned boundaries
+                if 'boundaries' in depth_aux:
+                    boundaries = depth_aux['boundaries'][0].cpu().numpy() * len(center_depth)
+                    for b in boundaries:
+                        ax5.axvline(b, color='r', linestyle='--', alpha=0.5)
+                
+                # Plot depth weight heatmap (middle slice)
+                ax6 = plt.subplot(3, 5, 6)
+                depth_mid = depth_weights.shape[-1] // 2
+                depth_slice = depth_weights[0, :, :, depth_mid].cpu().numpy()
+                im6 = ax6.imshow(depth_slice, cmap='hot')
+                ax6.set_title(f'Depth Weights (Slice {depth_mid})')
+                ax6.axis('off')
+                plt.colorbar(im6, ax=ax6, fraction=0.046)
+            
+            # Get model prediction
+            predicted, aux_info = model(xrays)
+            
+            # Plot predicted CT slices (axial, sagittal, coronal)
+            D, H, W = predicted.shape[2:]
+            
+            ax7 = plt.subplot(3, 5, 7)
+            pred_axial = predicted[0, 0, D//2].cpu().numpy()
+            im7 = ax7.imshow(pred_axial, cmap='gray', vmin=-1, vmax=1)
+            ax7.set_title('Predicted CT (Axial)')
+            ax7.axis('off')
+            plt.colorbar(im7, ax=ax7, fraction=0.046)
+            
+            ax8 = plt.subplot(3, 5, 8)
+            pred_sagittal = predicted[0, 0, :, H//2, :].cpu().numpy()
+            im8 = ax8.imshow(pred_sagittal, cmap='gray', vmin=-1, vmax=1)
+            ax8.set_title('Predicted CT (Sagittal)')
+            ax8.axis('off')
+            plt.colorbar(im8, ax=ax8, fraction=0.046)
+            
+            ax9 = plt.subplot(3, 5, 9)
+            pred_coronal = predicted[0, 0, :, :, W//2].cpu().numpy()
+            im9 = ax9.imshow(pred_coronal, cmap='gray', vmin=-1, vmax=1)
+            ax9.set_title('Predicted CT (Coronal)')
+            ax9.axis('off')
+            plt.colorbar(im9, ax=ax9, fraction=0.046)
+            
+            # Plot target CT slices
+            ax10 = plt.subplot(3, 5, 10)
+            target_axial = target[0, 0, D//2].cpu().numpy()
+            im10 = ax10.imshow(target_axial, cmap='gray', vmin=-1, vmax=1)
+            ax10.set_title('Target CT (Axial)')
+            ax10.axis('off')
+            plt.colorbar(im10, ax=ax10, fraction=0.046)
+            
+            ax11 = plt.subplot(3, 5, 11)
+            target_sagittal = target[0, 0, :, H//2, :].cpu().numpy()
+            im11 = ax11.imshow(target_sagittal, cmap='gray', vmin=-1, vmax=1)
+            ax11.set_title('Target CT (Sagittal)')
+            ax11.axis('off')
+            plt.colorbar(im11, ax=ax11, fraction=0.046)
+            
+            ax12 = plt.subplot(3, 5, 12)
+            target_coronal = target[0, 0, :, :, W//2].cpu().numpy()
+            im12 = ax12.imshow(target_coronal, cmap='gray', vmin=-1, vmax=1)
+            ax12.set_title('Target CT (Coronal)')
+            ax12.axis('off')
+            plt.colorbar(im12, ax=ax12, fraction=0.046)
+            
+            # Plot error maps
+            error = torch.abs(predicted - target)
+            
+            ax13 = plt.subplot(3, 5, 13)
+            error_axial = error[0, 0, D//2].cpu().numpy()
+            im13 = ax13.imshow(error_axial, cmap='hot', vmin=0, vmax=0.5)
+            ax13.set_title('Error Map (Axial)')
+            ax13.axis('off')
+            plt.colorbar(im13, ax=ax13, fraction=0.046)
+            
+            ax14 = plt.subplot(3, 5, 14)
+            error_sagittal = error[0, 0, :, H//2, :].cpu().numpy()
+            im14 = ax14.imshow(error_sagittal, cmap='hot', vmin=0, vmax=0.5)
+            ax14.set_title('Error Map (Sagittal)')
+            ax14.axis('off')
+            plt.colorbar(im14, ax=ax14, fraction=0.046)
+            
+            ax15 = plt.subplot(3, 5, 15)
+            error_coronal = error[0, 0, :, :, W//2].cpu().numpy()
+            im15 = ax15.imshow(error_coronal, cmap='hot', vmin=0, vmax=0.5)
+            ax15.set_title('Error Map (Coronal)')
+            ax15.axis('off')
+            plt.colorbar(im15, ax=ax15, fraction=0.046)
+            
+            # Compute metrics
+            psnr = compute_psnr(predicted, target)
+            
+            plt.suptitle(f'Epoch {epoch} - Feature Maps & Predictions (PSNR: {psnr:.2f} dB)', 
+                        fontsize=16, fontweight='bold')
+            plt.tight_layout()
+            
+            # Save figure
+            save_path = Path(save_dir) / f'epoch_{epoch:03d}_features.png'
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  ✓ Saved feature maps to {save_path}")
     
     except Exception as e:
         print(f"  ⚠ Warning: Visualization failed with error: {e}")
