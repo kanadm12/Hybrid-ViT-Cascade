@@ -73,12 +73,20 @@ def load_models(base_checkpoint, refinement_checkpoint, device):
         print(f"   Loading from: {refinement_checkpoint}")
         refinement_model = RefinementNetwork()
         checkpoint = torch.load(refinement_checkpoint, map_location=device)
-        refinement_model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Handle both 'refinement_state_dict' and 'model_state_dict' keys
+        if 'refinement_state_dict' in checkpoint:
+            refinement_model.load_state_dict(checkpoint['refinement_state_dict'])
+        elif 'model_state_dict' in checkpoint:
+            refinement_model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            refinement_model.load_state_dict(checkpoint)
+        
         refinement_model = refinement_model.to(device)
         refinement_model.eval()
         
         epoch = checkpoint.get('epoch', 'unknown')
-        psnr = checkpoint.get('best_psnr', 'unknown')
+        psnr = checkpoint.get('psnr', checkpoint.get('best_psnr', 'unknown'))
         print(f"   ✓ Loaded from epoch {epoch}")
         print(f"   ✓ Training PSNR: {psnr} dB")
     else:
