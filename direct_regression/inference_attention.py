@@ -176,7 +176,7 @@ def run_inference(model, dataloader, output_dir, save_volumes=False, device='cud
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="Running Inference")):
-            xrays = batch['xrays'].to(device)
+            xrays = batch['drr_stacked'].to(device)
             ct_volume = batch['ct_volume'].to(device)
             
             # Forward pass
