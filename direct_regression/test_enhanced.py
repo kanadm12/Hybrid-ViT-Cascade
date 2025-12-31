@@ -56,7 +56,7 @@ def test_enhanced_model():
         perceptual_weight=0.1,
         edge_weight=0.1,
         multiscale_weight=0.3
-    )
+    ).cuda()  # Move loss to GPU
     
     loss_dict = criterion(predicted, target, aux_outputs)
     
