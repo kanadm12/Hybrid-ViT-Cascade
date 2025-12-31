@@ -249,7 +249,7 @@ class AttentionEnhancedModel(nn.Module):
             ),
         ])
         
-        # Multi-scale outputs
+        # Multi-scale outputs (no downsampling needed - will downsample in forward)
         self.output_32 = nn.Conv3d(32, 1, 1)
         self.output_64 = nn.Conv3d(64, 1, 1)
         self.output_final = nn.Conv3d(base_channels, 1, 1)
@@ -303,8 +303,11 @@ class AttentionEnhancedModel(nn.Module):
             x = block(x)
             
             if i == 0:
-                aux_outputs['output_32'] = self.output_32(x)
+                # Downsample to 32³ spatial resolution
+                x_32 = F.interpolate(x, size=(32, 32, 32), mode='trilinear', align_corners=True)
+                aux_outputs['output_32'] = self.output_32(x_32)
             elif i == 1:
+                # Downsample to 64³ spatial resolution (but our volume_size is already 64³, so keep full)
                 aux_outputs['output_64'] = self.output_64(x)
             elif i == 2:
                 aux_outputs['output_final'] = self.output_final(x)
