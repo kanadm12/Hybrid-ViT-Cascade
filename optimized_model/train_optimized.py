@@ -162,12 +162,13 @@ def visualize_feature_maps(model, sample_batch, epoch, save_dir='visualizations'
     """
     Visualize feature maps from different stages of the model
     """
-    Path(save_dir).mkdir(exist_ok=True)
-    
-    model.eval()
-    with torch.no_grad():
-        # Handle dict format from PatientDRRDataset
-        if isinstance(sample_batch, dict):
+    try:
+        Path(save_dir).mkdir(exist_ok=True)
+        
+        model.eval()
+        with torch.no_grad():
+            # Handle dict format from PatientDRRDataset
+            if isinstance(sample_batch, dict):
             xrays = sample_batch['drr_stacked']  # (B, 2, 1, 512, 512)
             target = sample_batch['ct_volume']
         else:
@@ -215,9 +216,9 @@ def visualize_feature_maps(model, sample_batch, epoch, save_dir='visualizations'
         
         # If using learnable priors, visualize depth weights
         if model.use_learnable_priors:
-            pooled_features = F.adaptive_avg_pool1d(xray_context.unsqueeze(-1), 512).squeeze(-1)
-            xray_features_avg = xray_features_2d.mean(dim=1)
-            depth_weights, depth_aux = model.depth_lifter(xray_features_avg, pooled_features)
+            pooled_features = F.adaptive_avg_pool1d(xray_context.unsqueeze(1), 512).squeeze(1)
+            # Don't average - keep full features for depth_lifter which expects (B, C, H, W)
+            depth_weights, depth_aux = model.depth_lifter(xray_features_2d, pooled_features)
             
             # Plot depth distribution for center pixel
             ax5 = plt.subplot(3, 5, 5)
@@ -330,6 +331,12 @@ def visualize_feature_maps(model, sample_batch, epoch, save_dir='visualizations'
         plt.close()
         
         print(f"  ✓ Saved feature maps to {save_path}")
+    
+    except Exception as e:
+        print(f"  ⚠ Warning: Visualization failed with error: {e}")
+        print(f"  Continuing training...")
+        import traceback
+        traceback.print_exc()
 
 
 def main():
