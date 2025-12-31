@@ -189,7 +189,7 @@ def train_refinement_ddp(rank, world_size, config):
         print(f"✓ Loaded frozen base model from: {config['base_model_checkpoint']}")
     
     # Create refinement network
-    refinement = RefinementNetwork(in_channels=1).cuda(rank)
+    refinement = RefinementNetwork().cuda(rank)
     refinement = DDP(refinement, device_ids=[rank])
     
     if rank == 0:
