@@ -34,25 +34,27 @@ class PerceptualLoss(nn.Module):
         Returns:
             perceptual_loss: scalar
         """
-        # Extract middle slices (treat as 2D images)
-        D = pred.shape[2]
-        pred_slice = pred[:, :, D//2, :, :]  # (B, 1, H, W)
-        target_slice = target[:, :, D//2, :, :]
-        
-        # Convert to 3-channel for VGG and to float32 for VGG compatibility
-        pred_3ch = pred_slice.repeat(1, 3, 1, 1).float()
-        target_3ch = target_slice.repeat(1, 3, 1, 1).float()
-        
-        # Extract features at multiple layers
-        loss = 0
-        x_pred, x_target = pred_3ch, target_3ch
-        
-        for slice_net in [self.slice1, self.slice2, self.slice3]:
-            x_pred = slice_net(x_pred)
-            x_target = slice_net(x_target)
-            loss += F.l1_loss(x_pred, x_target)
-        
-        return loss / 3.0
+        # Disable autocast for VGG forward pass
+        with torch.cuda.amp.autocast(enabled=False):
+            # Extract middle slices (treat as 2D images)
+            D = pred.shape[2]
+            pred_slice = pred[:, :, D//2, :, :]  # (B, 1, H, W)
+            target_slice = target[:, :, D//2, :, :]
+            
+            # Convert to 3-channel for VGG and to float32
+            pred_3ch = pred_slice.repeat(1, 3, 1, 1).float()
+            target_3ch = target_slice.repeat(1, 3, 1, 1).float()
+            
+            # Extract features at multiple layers
+            loss = 0
+            x_pred, x_target = pred_3ch, target_3ch
+            
+            for slice_net in [self.slice1, self.slice2, self.slice3]:
+                x_pred = slice_net(x_pred)
+                x_target = slice_net(x_target)
+                loss += F.l1_loss(x_pred, x_target)
+            
+            return loss / 3.0
 
 
 class EdgeAwareLoss(nn.Module):
@@ -69,21 +71,23 @@ class EdgeAwareLoss(nn.Module):
     
     def compute_edges(self, x):
         """Compute edge magnitude using Sobel"""
-        # Convert to float32 for Sobel filters
-        x = x.float()
-        
-        # Process each depth slice
-        B, C, D, H, W = x.shape
-        edges = []
-        
-        for d in range(D):
-            slice_2d = x[:, :, d, :, :]  # (B, 1, H, W)
-            edge_x = F.conv2d(slice_2d, self.sobel_x, padding=1)
-            edge_y = F.conv2d(slice_2d, self.sobel_y, padding=1)
-            edge_mag = torch.sqrt(edge_x**2 + edge_y**2 + 1e-8)
-            edges.append(edge_mag)
-        
-        return torch.stack(edges, dim=2)  # (B, 1, D, H, W)
+        # Disable autocast for Sobel convolution
+        with torch.cuda.amp.autocast(enabled=False):
+            # Convert to float32 for Sobel filters
+            x = x.float()
+            
+            # Process each depth slice
+            B, C, D, H, W = x.shape
+            edges = []
+            
+            for d in range(D):
+                slice_2d = x[:, :, d, :, :]  # (B, 1, H, W)
+                edge_x = F.conv2d(slice_2d, self.sobel_x, padding=1)
+                edge_y = F.conv2d(slice_2d, self.sobel_y, padding=1)
+                edge_mag = torch.sqrt(edge_x**2 + edge_y**2 + 1e-8)
+                edges.append(edge_mag)
+            
+            return torch.stack(edges, dim=2)  # (B, 1, D, H, W)
     
     def forward(self, pred, target):
         pred_edges = self.compute_edges(pred)
