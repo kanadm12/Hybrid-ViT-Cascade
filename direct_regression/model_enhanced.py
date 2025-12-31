@@ -257,28 +257,32 @@ class RefinementNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         
-        # Upsampling with residual blocks (ESRGAN-inspired)
+        # Upsampling with residual blocks
+        # Stage 1: 64³ → 128³
         self.upsample1 = nn.Sequential(
             nn.Conv3d(1, 64, 3, padding=1),
-            nn.PixelShuffle(2),  # 64³ → 128³
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True),
+            nn.Conv3d(64, 32, 3, padding=1),
             nn.ReLU(inplace=True),
         )
         
         self.refine1 = nn.Sequential(
-            ResidualBlock3D(8),  # After pixel shuffle: 64/8 = 8 channels
-            ResidualBlock3D(8),
+            ResidualBlock3D(32),
+            ResidualBlock3D(32),
         )
         
+        # Stage 2: 128³ → 256³
         self.upsample2 = nn.Sequential(
-            nn.Conv3d(8, 64, 3, padding=1),
-            nn.PixelShuffle(2),  # 128³ → 256³
+            nn.Conv3d(32, 64, 3, padding=1),
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True),
+            nn.Conv3d(64, 16, 3, padding=1),
             nn.ReLU(inplace=True),
         )
         
         self.refine2 = nn.Sequential(
-            ResidualBlock3D(8),
-            ResidualBlock3D(8),
-            nn.Conv3d(8, 1, 3, padding=1),
+            ResidualBlock3D(16),
+            ResidualBlock3D(16),
+            nn.Conv3d(16, 1, 3, padding=1),
         )
     
     def forward(self, coarse_volume: torch.Tensor) -> torch.Tensor:
