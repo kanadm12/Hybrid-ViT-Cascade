@@ -279,7 +279,7 @@ def main():
         
         # Prepare inputs
         xrays = data['drr_stacked'].unsqueeze(0)  # (1, 2, 1, H, W)
-        target_256 = data['ct_volume'].unsqueeze(0)  # (1, 1, 256, 256, 256)
+        target_256 = data['ct_volume'].unsqueeze(0).to(device)  # (1, 1, 256, 256, 256)
         
         # Run inference
         pred_64, pred_256 = run_inference(base_model, refinement_model, xrays, device)
