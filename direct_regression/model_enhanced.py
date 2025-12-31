@@ -39,9 +39,9 @@ class PerceptualLoss(nn.Module):
         pred_slice = pred[:, :, D//2, :, :]  # (B, 1, H, W)
         target_slice = target[:, :, D//2, :, :]
         
-        # Convert to 3-channel for VGG
-        pred_3ch = pred_slice.repeat(1, 3, 1, 1)
-        target_3ch = target_slice.repeat(1, 3, 1, 1)
+        # Convert to 3-channel for VGG and to float32 for VGG compatibility
+        pred_3ch = pred_slice.repeat(1, 3, 1, 1).float()
+        target_3ch = target_slice.repeat(1, 3, 1, 1).float()
         
         # Extract features at multiple layers
         loss = 0
@@ -69,6 +69,9 @@ class EdgeAwareLoss(nn.Module):
     
     def compute_edges(self, x):
         """Compute edge magnitude using Sobel"""
+        # Convert to float32 for Sobel filters
+        x = x.float()
+        
         # Process each depth slice
         B, C, D, H, W = x.shape
         edges = []
