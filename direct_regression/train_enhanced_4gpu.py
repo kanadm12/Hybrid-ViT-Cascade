@@ -177,7 +177,7 @@ def train_ddp(rank, world_size, config):
         print(f"Total parameters: {total_params:,} ({total_params/1e6:.2f}M)")
     
     # Create loss and optimizer
-    criterion = EnhancedLoss(**config['loss'])
+    criterion = EnhancedLoss(**config['loss']).cuda(rank)
     
     optimizer = torch.optim.AdamW(
         model.parameters(),

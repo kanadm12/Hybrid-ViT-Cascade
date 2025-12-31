@@ -35,7 +35,7 @@ class PerceptualLoss(nn.Module):
             perceptual_loss: scalar
         """
         # Disable autocast for VGG forward pass
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             # Extract middle slices (treat as 2D images)
             D = pred.shape[2]
             pred_slice = pred[:, :, D//2, :, :]  # (B, 1, H, W)
@@ -72,7 +72,7 @@ class EdgeAwareLoss(nn.Module):
     def compute_edges(self, x):
         """Compute edge magnitude using Sobel"""
         # Disable autocast for Sobel convolution
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             # Convert to float32 for Sobel filters
             x = x.float()
             
