@@ -43,8 +43,8 @@ def test_enhanced_model():
     
     print(f"   Output shape: {predicted.shape}")
     print(f"   Auxiliary outputs: {len(aux_outputs)}")
-    for i, aux in enumerate(aux_outputs):
-        print(f"     Scale {i}: {aux.shape}")
+    for name, aux in aux_outputs.items():
+        print(f"     {name}: {aux.shape}")
     
     # Test loss
     print("\n4. Testing loss functions...")
