@@ -16,7 +16,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.dataset import CTReconstructionDataset
+from utils.dataset import PatientDRRDataset
 from model_attention import AttentionEnhancedModel
 
 
@@ -248,10 +248,11 @@ def main():
     
     # Create dataset
     print(f"\nLoading dataset from: {args.data_path}")
-    dataset = CTReconstructionDataset(
+    dataset = PatientDRRDataset(
         data_path=args.data_path,
-        num_patients=args.num_patients,
-        volume_size=(64, 64, 64)
+        target_xray_size=512,
+        target_volume_size=(64, 64, 64),
+        max_patients=args.num_patients
     )
     
     print(f"Found {len(dataset)} patients")
