@@ -50,10 +50,10 @@ def train_epoch(base_model, refinement, dataloader, criterion_dict, optimizer, s
     for batch_idx, batch in enumerate(dataloader):
         if isinstance(batch, dict):
             xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)
-            target_256 = batch['ct_volume_256'].cuda(rank, non_blocking=True)  # 256³ target
+            target_256 = batch['ct_volume'].cuda(rank, non_blocking=True)  # 256³ target
         else:
             xrays = batch['xrays'].cuda(rank, non_blocking=True)
-            target_256 = batch['ct_volume_256'].cuda(rank, non_blocking=True)
+            target_256 = batch['ct_volume'].cuda(rank, non_blocking=True)
         
         optimizer.zero_grad()
         
@@ -123,10 +123,10 @@ def validate(base_model, refinement, dataloader, criterion_dict, rank):
         for batch in dataloader:
             if isinstance(batch, dict):
                 xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)
-                target_256 = batch['ct_volume_256'].cuda(rank, non_blocking=True)
+                target_256 = batch['ct_volume'].cuda(rank, non_blocking=True)
             else:
                 xrays = batch['xrays'].cuda(rank, non_blocking=True)
-                target_256 = batch['ct_volume_256'].cuda(rank, non_blocking=True)
+                target_256 = batch['ct_volume'].cuda(rank, non_blocking=True)
             
             with torch.amp.autocast('cuda'):
                 # Base prediction
