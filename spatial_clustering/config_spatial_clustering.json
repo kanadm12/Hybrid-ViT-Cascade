@@ -1,0 +1,61 @@
+{
+  "model": {
+    "type": "spatial_clustering",
+    "volume_size": [64, 64, 64],
+    "voxel_dim": 256,
+    "num_clusters": 64,
+    "num_heads": 8,
+    "num_blocks": 6,
+    "position_encoding": {
+      "num_freq_bands": 10,
+      "d_model": 128
+    },
+    "clustering": {
+      "use_position": true,
+      "use_intensity": true,
+      "temperature": 1.0
+    }
+  },
+  "training": {
+    "batch_size": 4,
+    "num_epochs": 20,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.01,
+    "gradient_clip": 1.0,
+    "mixed_precision": true,
+    "accumulation_steps": 4,
+    "num_patients": 500
+  },
+  "loss_weights": {
+    "lambda_position": 1.0,
+    "lambda_intensity": 1.0,
+    "lambda_contrast": 0.5,
+    "lambda_cluster": 0.3
+  },
+  "data": {
+    "data_dir": "../data",
+    "train_split": 0.8,
+    "val_split": 0.1,
+    "test_split": 0.1,
+    "num_workers": 4,
+    "xray_size": [512, 512]
+  },
+  "optimizer": {
+    "type": "AdamW",
+    "betas": [0.9, 0.999],
+    "eps": 1e-8
+  },
+  "scheduler": {
+    "type": "CosineAnnealingWarmRestarts",
+    "T_0": 10,
+    "T_mult": 2,
+    "eta_min": 1e-6
+  },
+  "logging": {
+    "log_interval": 10,
+    "save_interval": 1000,
+    "visualize_interval": 500,
+    "checkpoint_dir": "checkpoints/spatial_clustering",
+    "log_dir": "logs/spatial_clustering"
+  }
+}
