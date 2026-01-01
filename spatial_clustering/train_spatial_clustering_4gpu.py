@@ -370,7 +370,23 @@ class SpatialClusteringTrainer:
             print(f"Loading checkpoint from {checkpoint_path}...")
         
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        self.model.module.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Try to load model state dict with strict=False to handle architecture mismatches
+        missing_keys, unexpected_keys = self.model.module.load_state_dict(
+            checkpoint['model_state_dict'], strict=False
+        )
+        
+        if self.local_rank == 0:
+            if missing_keys:
+                print(f"\n⚠️  WARNING: Checkpoint architecture mismatch!")
+                print(f"   Missing {len(missing_keys)} keys (new model has these, checkpoint doesn't)")
+                print(f"   Unexpected {len(unexpected_keys)} keys (checkpoint has these, new model doesn't)")
+                print(f"   → Starting FRESH training with enhanced model (cannot resume from base model)")
+                print(f"   → Enhanced model will be trained from random initialization\n")
+                # Don't load optimizer/scheduler/metrics since we're starting fresh
+                return
+        
+        # Only load optimizer/scheduler/metrics if architectures match
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         self.epoch = checkpoint['epoch'] + 1  # Start from next epoch
@@ -382,6 +398,7 @@ class SpatialClusteringTrainer:
         if self.local_rank == 0:
             print(f"✓ Resumed from epoch {checkpoint['epoch']}, step {self.global_step}")
             print(f"✓ Best val loss so far: {self.best_val_loss:.6f}")
+
     
     def train(self, train_loader, val_loader, resume_from: str = None):
         """Main training loop"""
