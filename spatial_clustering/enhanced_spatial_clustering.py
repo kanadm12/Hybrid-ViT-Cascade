@@ -195,9 +195,9 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         # Flatten to voxel sequence
         x = x_3d.view(B, self.voxel_dim, self.num_voxels).transpose(1, 2)  # (B, N, voxel_dim)
         
-        # Position encoding
-        position_features = self.position_encoder(self.volume_size, x.device)  # (N, 128)
-        position_features = position_features.unsqueeze(0).expand(B, -1, -1)  # (B, N, 128)
+        # Position encoding (keep unexpanded for clustering module)
+        position_features_raw = self.position_encoder(self.volume_size, x.device)  # (N, 128)
+        position_features = position_features_raw.unsqueeze(0).expand(B, -1, -1)  # (B, N, 128)
         
         # Combine with position
         x = torch.cat([x, position_features], dim=-1)  # (B, N, voxel_dim + 128)
@@ -211,8 +211,8 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         # Compute intensity features for clustering
         intensity_features = x.mean(dim=-1, keepdim=True)  # (B, N, 1)
         
-        # Cluster voxels
-        cluster_assignments, x = self.clustering(x, position_features, intensity_features)
+        # Cluster voxels (pass unexpanded position_features)
+        cluster_assignments, x = self.clustering(x, position_features_raw, intensity_features)
         
         # NEW: Cluster interaction (let clusters talk to each other)
         cluster_features = torch.einsum('bnc,bnk->bkc', x, cluster_assignments)
