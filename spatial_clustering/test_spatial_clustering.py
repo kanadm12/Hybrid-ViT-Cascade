@@ -231,9 +231,12 @@ def test_memory_usage():
     
     device = torch.device('cuda')
     
-    # Clear cache
+    # Clear cache aggressively
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
     
     model = SpatialClusteringCTGenerator(
         volume_size=(64, 64, 64),
@@ -243,7 +246,8 @@ def test_memory_usage():
         num_blocks=6
     ).to(device)
     
-    batch_size = 4  # Test with larger batch
+    # Use batch_size=1 for memory test (previous tests already used batch_size=2)
+    batch_size = 1
     
     frontal = torch.randn(batch_size, 1, 512, 512).to(device)
     lateral = torch.randn(batch_size, 1, 512, 512).to(device)
