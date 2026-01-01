@@ -238,14 +238,16 @@ def main_worker(rank, world_size, config):
         data_path=config['data_dir'],
         target_xray_size=config['xray_size'],
         target_volume_size=tuple(config['volume_size']),
-        augmentation=True
+        augmentation=True,
+        max_patients=config.get('max_patients', None)
     )
     
     val_dataset = PatientDRRDataset(
         data_path=config['data_dir'],
         target_xray_size=config['xray_size'],
         target_volume_size=tuple(config['volume_size']),
-        augmentation=False
+        augmentation=False,
+        max_patients=config.get('max_patients', None)
     )
     
     # Samplers
