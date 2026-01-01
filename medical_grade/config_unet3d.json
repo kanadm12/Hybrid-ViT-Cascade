@@ -9,7 +9,7 @@
   "base_channels": 32,
   "volume_size": [64, 64, 64],
   "xray_size": 512,
-  "ddp_port": 12359,
+  "ddp_port": 12360,
   "loss_weights": {
     "l1": 1.0,
     "ssim": 0.3,
