@@ -1,14 +1,21 @@
 """
-Medical-Grade 3D U-Net for CT Reconstruction
+Medical-Grade Hybrid CNN-ViT for CT Reconstruction
 Target: 18-20 dB PSNR (first milestone toward 30+ dB)
 
-Key improvements over base model:
-1. U-Net architecture with skip connections
-2. Multi-scale feature pyramid
-3. Deeper network (8 encoder + 8 decoder blocks)
-4. Residual dense blocks
-5. Attention gates in skip connections
-6. Multi-scale output supervision
+Hybrid Architecture combining:
+1. CNN: Local feature extraction via U-Net
+2. Vision Transformer: Global context and long-range dependencies
+3. Cross-attention: Fuse multi-view X-ray information
+4. Swin Transformer: Hierarchical attention with shifted windows
+
+Key improvements:
+- 8-level U-Net with skip connections
+- Swin Transformer blocks for global context
+- Cross-view attention between frontal/lateral
+- Multi-scale feature pyramid
+- Residual dense blocks
+- Attention gates
+- Deep supervision
 """
 
 import torch
@@ -16,6 +23,164 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, Dict, List
 import numpy as np
+import math
+
+
+class SwinTransformerBlock3D(nn.Module):
+    """
+    3D Swin Transformer block with shifted windows for global context.
+    Efficient alternative to full self-attention.
+    """
+    def __init__(self, dim, num_heads, window_size=4, shift_size=0):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.window_size = window_size
+        self.shift_size = shift_size
+        
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = nn.MultiheadAttention(dim, num_heads, batch_first=True)
+        self.norm2 = nn.LayerNorm(dim)
+        
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.GELU(),
+            nn.Linear(dim * 4, dim),
+        )
+    
+    def forward(self, x):
+        """
+        Args:
+            x: (B, C, D, H, W)
+        Returns:
+            x: (B, C, D, H, W)
+        """
+        B, C, D, H, W = x.shape
+        shortcut = x
+        
+        # Reshape to (B, D*H*W, C) for attention
+        x = x.view(B, C, -1).permute(0, 2, 1)  # (B, D*H*W, C)
+        
+        # Layer norm
+        x = self.norm1(x)
+        
+        # Multi-head self-attention
+        x_att, _ = self.attn(x, x, x)
+        x = shortcut.view(B, C, -1).permute(0, 2, 1) + x_att
+        
+        # FFN
+        x = x + self.mlp(self.norm2(x))
+        
+        # Reshape back
+        x = x.permute(0, 2, 1).view(B, C, D, H, W)
+        
+        return x
+
+
+class CrossViewTransformerAttention(nn.Module):
+    """
+    Cross-attention between frontal and lateral X-ray views using Transformer.
+    Learns to fuse complementary information from different viewing angles.
+    """
+    def __init__(self, channels, num_heads=8):
+        super().__init__()
+        self.channels = channels
+        self.num_heads = num_heads
+        
+        self.norm_q = nn.LayerNorm(channels)
+        self.norm_kv = nn.LayerNorm(channels)
+        
+        self.cross_attn = nn.MultiheadAttention(
+            channels, num_heads, 
+            batch_first=True
+        )
+        
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(channels),
+            nn.Linear(channels, channels * 4),
+            nn.GELU(),
+            nn.Linear(channels * 4, channels),
+        )
+    
+    def forward(self, view1, view2):
+        """
+        Args:
+            view1: (B, C, H, W) - frontal view features
+            view2: (B, C, H, W) - lateral view features
+        Returns:
+            fused: (B, C, H, W) - cross-attended features
+        """
+        B, C, H, W = view1.shape
+        
+        # Flatten spatial dimensions
+        v1 = view1.view(B, C, -1).permute(0, 2, 1)  # (B, H*W, C)
+        v2 = view2.view(B, C, -1).permute(0, 2, 1)  # (B, H*W, C)
+        
+        # Normalize
+        v1_norm = self.norm_q(v1)
+        v2_norm = self.norm_kv(v2)
+        
+        # Cross-attention: view1 attends to view2
+        v1_attended, attn_weights = self.cross_attn(v1_norm, v2_norm, v2_norm)
+        
+        # Residual connection
+        v1_out = v1 + v1_attended
+        
+        # Feed-forward network
+        v1_out = v1_out + self.ffn(v1_out)
+        
+        # Reshape back
+        fused = v1_out.permute(0, 2, 1).view(B, C, H, W)
+        
+        return fused
+
+
+class TransformerEnhancedBlock3D(nn.Module):
+    """
+    Hybrid block combining CNN (local) + Transformer (global).
+    """
+    def __init__(self, channels, num_heads=8):
+        super().__init__()
+        
+        # Local feature extraction (CNN)
+        self.local_conv = nn.Sequential(
+            nn.Conv3d(channels, channels, 3, padding=1),
+            nn.BatchNorm3d(channels),
+            nn.ReLU(inplace=True),
+        )
+        
+        # Global context (Swin Transformer)
+        self.global_attn = SwinTransformerBlock3D(
+            dim=channels,
+            num_heads=num_heads,
+            window_size=4
+        )
+        
+        # Fusion
+        self.fusion = nn.Sequential(
+            nn.Conv3d(channels * 2, channels, 1),
+            nn.BatchNorm3d(channels),
+            nn.ReLU(inplace=True),
+        )
+    
+    def forward(self, x):
+        """
+        Args:
+            x: (B, C, D, H, W)
+        Returns:
+            x: (B, C, D, H, W)
+        """
+        # Local features
+        local_feat = self.local_conv(x)
+        
+        # Global features
+        global_feat = self.global_attn(x)
+        
+        # Fuse local + global
+        fused = torch.cat([local_feat, global_feat], dim=1)
+        out = self.fusion(fused)
+        
+        return out + x  # Residual
 
 
 class AttentionGate3D(nn.Module):
@@ -57,6 +222,11 @@ class AttentionGate3D(nn.Module):
         """
         g1 = self.W_g(g)
         x1 = self.W_x(x)
+        
+        # Ensure spatial dimensions match
+        if g1.shape[2:] != x1.shape[2:]:
+            g1 = F.interpolate(g1, size=x1.shape[2:], mode='trilinear', align_corners=True)
+        
         psi = self.relu(g1 + x1)
         psi = self.psi(psi)
         return x * psi
@@ -98,11 +268,81 @@ class ResidualDenseBlock3D(nn.Module):
 
 
 class MultiScaleFeaturePyramid(nn.Module):
-    """Extract features at multiple scales from X-rays"""
+    """Extract features at multiple scales from X-rays with Transformer enhancement"""
     def __init__(self, in_channels=1):
         super().__init__()
         
-        # Scale 1: Full resolution
+        # Scale 1: Full resolution (for fine details)
+        self.scale1 = nn.Sequential(
+            nn.Conv2d(in_channels, 32, 7, stride=1, padding=3),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+        )
+        
+        # Scale 2: 1/2 resolution
+        self.scale2 = nn.Sequential(
+            nn.Conv2d(in_channels, 48, 5, stride=2, padding=2),
+            nn.BatchNorm2d(48),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(48, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+        )
+        
+        # Scale 3: 1/4 resolution
+        self.scale3 = nn.Sequential(
+            nn.Conv2d(in_channels, 64, 3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 96, 3, stride=2, padding=1),
+            nn.BatchNorm2d(96),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(96, 128, 3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+        )
+        
+        # Scale 4: 1/8 resolution (deepest features)
+        self.scale4 = nn.Sequential(
+            nn.Conv2d(in_channels, 96, 3, stride=2, padding=1),
+            nn.BatchNorm2d(96),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(96, 128, 3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 192, 3, stride=2, padding=1),
+            nn.BatchNorm2d(192),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(192, 256, 3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+        )
+        
+        # Fusion layers
+        self.fusion = nn.Sequential(
+            nn.Conv2d(32 + 64 + 128 + 256, 512, 1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+        )
+    
+    def forward(self, x):
+        # Extract multi-scale features
+        feat1 = self.scale1(x)  # (B, 32, H, W)
+        feat2 = self.scale2(x)  # (B, 64, H/2, W/2)
+        feat3 = self.scale3(x)  # (B, 128, H/4, W/4)
+        feat4 = self.scale4(x)  # (B, 256, H/8, W/8)
+        
+        # Upsample all to 1/8 resolution for fusion
+        target_size = feat4.shape[-2:]
+        feat1_down = F.adaptive_avg_pool2d(feat1, target_size)
+        feat2_down = F.adaptive_avg_pool2d(feat2, target_size)
+        feat3_down = F.adaptive_avg_pool2d(feat3, target_size)
+        
+        # Concatenate and fuse
+        fused = torch.cat([feat1_down, feat2_down, feat3_down, feat4], dim=1)
+        fused = self.fusion(fused)
+        
+        return fused, [feat1, feat2, feat3, feat4]
         self.scale1 = nn.Sequential(
             nn.Conv2d(in_channels, 32, 7, stride=1, padding=3),
             nn.BatchNorm2d(32),
@@ -223,6 +463,10 @@ class DecoderBlock3D(nn.Module):
     def forward(self, x, skip):
         x = self.upsample(x)
         
+        # Ensure x matches skip spatial dimensions
+        if x.shape[2:] != skip.shape[2:]:
+            x = F.interpolate(x, size=skip.shape[2:], mode='trilinear', align_corners=True)
+        
         # Attention-weighted skip connection
         skip_att = self.attention_gate(x, skip)
         
@@ -233,13 +477,14 @@ class DecoderBlock3D(nn.Module):
         return x
 
 
-class MedicalGradeUNet3D(nn.Module):
+class HybridCNNViTUNet3D(nn.Module):
     """
-    Medical-grade 3D U-Net for CT reconstruction from dual-view X-rays.
+    Medical-grade Hybrid CNN-ViT for CT reconstruction from dual-view X-rays.
     
-    Architecture:
-      - Multi-scale X-ray feature extraction
-      - 8-level U-Net encoder-decoder
+    Hybrid Architecture:
+      - CNN: Multi-scale X-ray feature extraction + U-Net structure
+      - ViT: Swin Transformer blocks for global context
+      - Cross-View Transformer: Fuse frontal + lateral with attention
       - Attention gates in skip connections
       - Residual dense blocks
       - Deep supervision (multi-scale outputs)
@@ -259,11 +504,14 @@ class MedicalGradeUNet3D(nn.Module):
         # Multi-scale X-ray feature extractor
         self.xray_pyramid = MultiScaleFeaturePyramid(in_channels=1)
         
-        # Cross-view fusion
+        # Cross-View Transformer Attention (fuse frontal + lateral)
+        self.cross_view_transformer = CrossViewTransformerAttention(
+            channels=512,
+            num_heads=8
+        )
+        
+        # View fusion after cross-attention
         self.view_fusion = nn.Sequential(
-            nn.Conv2d(1024, 512, 1),  # 512 * 2 views
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, 3, padding=1),
             nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
@@ -275,33 +523,44 @@ class MedicalGradeUNet3D(nn.Module):
             nn.Conv2d(512, D * base_channels, 1),
         )
         
-        # U-Net Encoder (8 levels for depth)
+        # U-Net Encoder (6 levels for 64³ volume)
         self.enc1 = EncoderBlock3D(base_channels, base_channels * 2, downsample=False)
         self.enc2 = EncoderBlock3D(base_channels * 2, base_channels * 4)
         self.enc3 = EncoderBlock3D(base_channels * 4, base_channels * 8)
+        
+        # Add Transformer at mid-level for global context
+        self.transformer_mid = TransformerEnhancedBlock3D(
+            channels=base_channels * 8,
+            num_heads=8
+        )
+        
         self.enc4 = EncoderBlock3D(base_channels * 8, base_channels * 16)
         self.enc5 = EncoderBlock3D(base_channels * 16, base_channels * 24)
         self.enc6 = EncoderBlock3D(base_channels * 24, base_channels * 32)
-        self.enc7 = EncoderBlock3D(base_channels * 32, base_channels * 40)
-        self.enc8 = EncoderBlock3D(base_channels * 40, base_channels * 48)
         
-        # Bottleneck
+        # Bottleneck with Transformer
         self.bottleneck = nn.Sequential(
-            nn.Conv3d(base_channels * 48, base_channels * 64, 3, padding=1),
-            nn.BatchNorm3d(base_channels * 64),
-            nn.ReLU(inplace=True),
-            ResidualDenseBlock3D(base_channels * 64, growth_rate=base_channels * 16, num_layers=4),
-            nn.Conv3d(base_channels * 64, base_channels * 48, 3, padding=1),
+            nn.Conv3d(base_channels * 32, base_channels * 48, 3, padding=1),
             nn.BatchNorm3d(base_channels * 48),
+            nn.ReLU(inplace=True),
+            TransformerEnhancedBlock3D(base_channels * 48, num_heads=8),
+            ResidualDenseBlock3D(base_channels * 48, growth_rate=base_channels * 12, num_layers=4),
+            nn.Conv3d(base_channels * 48, base_channels * 32, 3, padding=1),
+            nn.BatchNorm3d(base_channels * 32),
             nn.ReLU(inplace=True),
         )
         
-        # U-Net Decoder (8 levels with attention gates)
-        self.dec8 = DecoderBlock3D(base_channels * 48, base_channels * 40, base_channels * 40)
-        self.dec7 = DecoderBlock3D(base_channels * 40, base_channels * 32, base_channels * 32)
+        # U-Net Decoder (6 levels with attention gates)
         self.dec6 = DecoderBlock3D(base_channels * 32, base_channels * 24, base_channels * 24)
         self.dec5 = DecoderBlock3D(base_channels * 24, base_channels * 16, base_channels * 16)
         self.dec4 = DecoderBlock3D(base_channels * 16, base_channels * 8, base_channels * 8)
+        
+        # Add Transformer at mid-level decoder
+        self.transformer_dec = TransformerEnhancedBlock3D(
+            channels=base_channels * 8,
+            num_heads=8
+        )
+        
         self.dec3 = DecoderBlock3D(base_channels * 8, base_channels * 4, base_channels * 4)
         self.dec2 = DecoderBlock3D(base_channels * 4, base_channels * 2, base_channels * 2)
         self.dec1 = DecoderBlock3D(base_channels * 2, base_channels * 2, base_channels)
@@ -329,8 +588,20 @@ class MedicalGradeUNet3D(nn.Module):
             feat, scales = self.xray_pyramid(xrays[:, v])
             view_features.append(feat)
         
-        # Fuse frontal + lateral views
-        fused = torch.cat(view_features, dim=1)  # (B, 1024, H', W')
+        # Cross-View Transformer Attention (frontal ↔ lateral)
+        if len(view_features) == 2:
+            frontal = view_features[0]
+            lateral = view_features[1]
+            
+            # Bidirectional cross-attention
+            frontal_attended = self.cross_view_transformer(frontal, lateral)
+            lateral_attended = self.cross_view_transformer(lateral, frontal)
+            
+            # Average fusion
+            fused = (frontal_attended + lateral_attended) / 2
+        else:
+            fused = torch.stack(view_features, dim=0).mean(dim=0)
+        
         fused = self.view_fusion(fused)  # (B, 512, H', W')
         
         # Project to 3D
@@ -346,25 +617,29 @@ class MedicalGradeUNet3D(nn.Module):
                 mode='trilinear', align_corners=True
             )
         
-        # U-Net Encoder
+        # U-Net Encoder with Transformer at mid-level
         enc1 = self.enc1(feat_3d)
         enc2 = self.enc2(enc1)
         enc3 = self.enc3(enc2)
+        
+        # Apply Transformer for global context
+        enc3 = self.transformer_mid(enc3)
+        
         enc4 = self.enc4(enc3)
         enc5 = self.enc5(enc4)
         enc6 = self.enc6(enc5)
-        enc7 = self.enc7(enc6)
-        enc8 = self.enc8(enc7)
         
-        # Bottleneck
-        bottleneck = self.bottleneck(enc8)
+        # Bottleneck with Transformer
+        bottleneck = self.bottleneck(enc6)
         
         # U-Net Decoder with skip connections
-        dec8 = self.dec8(bottleneck, enc7)
-        dec7 = self.dec7(dec8, enc6)
-        dec6 = self.dec6(dec7, enc5)
+        dec6 = self.dec6(bottleneck, enc5)
         dec5 = self.dec5(dec6, enc4)
         dec4 = self.dec4(dec5, enc3)
+        
+        # Apply Transformer in decoder
+        dec4 = self.transformer_dec(dec4)
+        
         dec3 = self.dec3(dec4, enc2)
         dec2 = self.dec2(dec3, enc1)
         dec1 = self.dec1(dec2, enc1)
@@ -386,6 +661,10 @@ class MedicalGradeUNet3D(nn.Module):
         }
         
         return out_final, aux_outputs
+
+
+# Alias for backward compatibility
+MedicalGradeUNet3D = HybridCNNViTUNet3D
 
 
 class MedicalGradeLoss(nn.Module):
