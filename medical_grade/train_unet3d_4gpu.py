@@ -13,7 +13,8 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import autocast
+from torch.amp import GradScaler
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 import numpy as np
