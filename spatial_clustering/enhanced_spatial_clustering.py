@@ -104,8 +104,9 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         # Clustering module
         self.clustering = VoxelClusteringModule(
             voxel_dim=voxel_dim,
-            position_dim=128,
-            num_clusters=num_clusters
+            num_clusters=num_clusters,
+            use_position=True,
+            use_intensity=True
         )
         
         # NEW: Cluster interaction attention
