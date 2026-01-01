@@ -89,7 +89,7 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         )
         
         # Position encoding
-        self.position_encoder = PositionEncodingModule(volume_size)
+        self.position_encoder = PositionEncodingModule(num_freq_bands=10, d_model=128)
         
         # Initial projection to 3D
         self.to_3d = nn.Sequential(
@@ -195,7 +195,7 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         x = x_3d.view(B, self.voxel_dim, self.num_voxels).transpose(1, 2)  # (B, N, voxel_dim)
         
         # Position encoding
-        position_features = self.position_encoder()  # (N, 128)
+        position_features = self.position_encoder(self.volume_size, x.device)  # (N, 128)
         position_features = position_features.unsqueeze(0).expand(B, -1, -1)  # (B, N, 128)
         
         # Combine with position
