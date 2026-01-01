@@ -211,7 +211,8 @@ class ClusterAwareAttention(nn.Module):
         v_cluster = torch.einsum('bhnc,bnk->bhkc', v, cluster_assignments)  # (B, num_heads, K, head_dim)
         
         # Normalize by cluster size
-        cluster_sizes = cluster_assignments.sum(dim=1, keepdim=True).transpose(-2, -1)  # (B, 1, K, 1)
+        cluster_sizes = cluster_assignments.sum(dim=1, keepdim=True)  # (B, 1, K)
+        cluster_sizes = cluster_sizes.unsqueeze(-1)  # (B, 1, K, 1) for broadcasting
         k_cluster = k_cluster / (cluster_sizes + 1e-8)
         v_cluster = v_cluster / (cluster_sizes + 1e-8)
         
