@@ -260,6 +260,14 @@ class SpatialClusteringTrainer:
             self.global_step += 1
             
             # Logging
+            if self.global_step % self.config['logging']['log_interval'] == 0:
+                self._log_metrics(loss_dict, 'train')
+            
+            # Visualization
+            if self.global_step % self.config['logging']['visualize_interval'] == 0:
+                self._visualize_predictions(output, gt_volume, batch_idx)
+        
+        # Average epoch losses
         num_psnr_ssim_samples = len(train_loader) // 5 + 1
         for k in epoch_losses.keys():
             epoch_losses[k] /= len(train_loader)
@@ -268,17 +276,15 @@ class SpatialClusteringTrainer:
         epoch_losses['psnr'] = epoch_psnr / num_psnr_ssim_samples
         epoch_losses['ssim'] = epoch_ssim / num_psnr_ssim_samples
         self.train_metrics['psnr'].append(epoch_losses['psnr'])
-        self.train_metrics['ssim'].append(epoch_losses['ssim'
-            # Visualization
-            if self.global_step % self.config['logging']['visualize_interval'] == 0:
-                self._visualize_predictions(output, gt_volume, batch_idx)
+        self.train_metrics['ssim'].append(epoch_losses['ssim'])
         
-        # Average epoch losses
-        for k in epoch_losses.keys():
-            epoch_losses[k] /= len(train_loader)
-            self.train_metrics[k].append(epoch_losses[k])
-        
-        return epoch_losses['total_loss', 'position_loss', 'intensity_loss', 'contrast_loss', 'cluster_consistency']}
+        return epoch_losses
+    
+    @torch.no_grad()
+    def validate(self, val_loader):
+        """Validate the model"""
+        self.model.eval()
+        val_losses = {k: 0.0 for k in ['total_loss', 'position_loss', 'intensity_loss', 'contrast_loss', 'cluster_consistency']}
         val_psnr = 0.0
         val_ssim = 0.0
         
@@ -313,13 +319,7 @@ class SpatialClusteringTrainer:
         val_losses['psnr'] = val_psnr / len(val_loader)
         val_losses['ssim'] = val_ssim / len(val_loader)
         self.val_metrics['psnr'].append(val_losses['psnr'])
-        self.val_metrics['ssim'].append(val_losses['ssim'
-                val_losses[k] += loss_dict[k].item()
-        
-        # Average validation losses
-        for k in val_losses.keys():
-            val_losses[k] /= len(val_loader)
-            self.val_metrics[k].append(val_losses[k])
+        self.val_metrics['ssim'].append(val_losses['ssim'])
         
         return val_losses
     
@@ -412,7 +412,26 @@ class SpatialClusteringTrainer:
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         self.epoch = checkpoint['epoch']
-        self.global_step = checkpoint['globametrics:")
+        self.global_step = checkpoint['global_step']
+        self.train_metrics = checkpoint['train_metrics']
+        self.val_metrics = checkpoint['val_metrics']
+        print(f"Loaded checkpoint from epoch {self.epoch}")
+    
+    def train(self, train_loader, val_loader, resume_from: str = None):
+        """Main training loop"""
+        if resume_from:
+            self.load_checkpoint(resume_from)
+        
+        print("\n" + "="*80)
+        print("Starting training...")
+        print("="*80 + "\n")
+        
+        for epoch in range(self.epoch, self.config['training']['num_epochs']):
+            self.epoch = epoch
+            
+            # Train
+            train_losses = self.train_epoch(train_loader)
+            print(f"\nEpoch {epoch} - Train metrics:")
             for k, v in train_losses.items():
                 if k in ['psnr', 'ssim']:
                     print(f"  {k}: {v:.4f}")
@@ -426,26 +445,7 @@ class SpatialClusteringTrainer:
                 if k in ['psnr', 'ssim']:
                     print(f"  {k}: {v:.4f}")
                 else:
-                self.load_checkpoint(resume_from)
-        
-        print("\n" + "="*80)
-        print("Starting training...")
-        print("="*80 + "\n")
-        
-        for epoch in range(self.epoch, self.config['training']['num_epochs']):
-            self.epoch = epoch
-            
-            # Train
-            train_losses = self.train_epoch(train_loader)
-            print(f"\nEpoch {epoch} - Train losses:")
-            for k, v in train_losses.items():
-                print(f"  {k}: {v:.6f}")
-            
-            # Validate
-            val_losses = self.validate(val_loader)
-            print(f"Epoch {epoch} - Val losses:")
-            for k, v in val_losses.items():
-                print(f"  {k}: {v:.6f}")
+                    print(f"  {k}: {v:.6f}")
             
             # Check for best model
             is_best = val_losses['total_loss'] < self.best_val_loss
