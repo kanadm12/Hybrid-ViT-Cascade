@@ -468,37 +468,87 @@ if __name__ == "__main__":
     # Create trainer
     trainer = SpatialClusteringTrainer('config_spatial_clustering.json')
     
-    # Create dummy dataset (replace with your actual dataset)
-    # Your dataset should have 500 patients total
-    class DummyDataset(torch.utils.data.Dataset):
-        def __init__(self, num_samples=500):
-            self.num_samples = num_samples
+    # Load actual CT dataset
+    import glob
+    import nibabel as nib
+    from PIL import Image
+    import numpy as np
+    
+    class CTDRRDataset(torch.utils.data.Dataset):
+        def __init__(self, data_dir='/workspace/drr_patient_data', num_samples=500):
+            self.data_dir = data_dir
+            # Get all patient folders
+            self.patient_dirs = sorted(glob.glob(f"{data_dir}/*"))[:num_samples]
+            print(f"Found {len(self.patient_dirs)} patient folders")
             
         def __len__(self):
-            return self.num_samples
+            return len(self.patient_dirs)
         
         def __getitem__(self, idx):
+            patient_dir = self.patient_dirs[idx]
+            patient_id = os.path.basename(patient_dir)
+            
+            # Load PA (frontal) DRR
+            pa_path = os.path.join(patient_dir, f"{patient_id}_pa_drr.png")
+            frontal = np.array(Image.open(pa_path).convert('L'))
+            frontal = torch.from_numpy(frontal).float().unsqueeze(0) / 255.0  # (1, H, W)
+            
+            # Load LAT (lateral) DRR
+            lat_path = os.path.join(patient_dir, f"{patient_id}_lat_drr.png")
+            lateral = np.array(Image.open(lat_path).convert('L'))
+            lateral = torch.from_numpy(lateral).float().unsqueeze(0) / 255.0  # (1, H, W)
+            
+            # Load CT volume
+            ct_path = os.path.join(patient_dir, f"{patient_id}.nii.gz")
+            ct_img = nib.load(ct_path)
+            volume = ct_img.get_fdata()
+            
+            # Resize volume to (64, 64, 64)
+            import torch.nn.functional as F
+            volume_tensor = torch.from_numpy(volume).float().unsqueeze(0).unsqueeze(0)  # (1, 1, D, H, W)
+            volume_resized = F.interpolate(volume_tensor, size=(64, 64, 64), mode='trilinear', align_corners=False)
+            volume_resized = volume_resized.squeeze(0)  # (1, 64, 64, 64)
+            
+            # Normalize volume to [0, 1]
+            volume_resized = (volume_resized - volume_resized.min()) / (volume_resized.max() - volume_resized.min() + 1e-8)
+            
+            # Resize X-rays to 512x512 if needed
+            if frontal.shape[-2:] != (512, 512):
+                frontal = F.interpolate(frontal.unsqueeze(0), size=(512, 512), mode='bilinear', align_corners=False).squeeze(0)
+            if lateral.shape[-2:] != (512, 512):
+                lateral = F.interpolate(lateral.unsqueeze(0), size=(512, 512), mode='bilinear', align_corners=False).squeeze(0)
+            
             return {
-                'frontal': torch.randn(1, 512, 512),
-                'lateral': torch.randn(1, 512, 512),
-                'volume': torch.randn(1, 64, 64, 64)
+                'frontal': frontal,
+                'lateral': lateral,
+                'volume': volume_resized
             }
     
+    # Create dataset
+    full_dataset = CTDRRDataset(num_samples=500)
+    
     # Split into train/val (80/20 split for 500 patients)
-    train_dataset = DummyDataset(400)  # 400 train patients
-    val_dataset = DummyDataset(100)    # 100 val patients
+    train_size = 400
+    val_size = 100
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        full_dataset, 
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)
+    )
     
     train_loader = DataLoader(
         train_dataset,
-        batch_size=4,
+        batch_size=2,  # Reduced for memory efficiency
         shuffle=True,
-        num_workers=4
+        num_workers=4,
+        pin_memory=True
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=4,
+        batch_size=2,
         shuffle=False,
-        num_workers=4
+        num_workers=4,
+        pin_memory=True
     )
     
     print(f"\nDataset Info:")

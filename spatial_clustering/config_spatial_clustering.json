@@ -17,13 +17,13 @@
     }
   },
   "training": {
-    "batch_size": 4,
+    "batch_size": 2,
     "num_epochs": 20,
     "learning_rate": 0.0001,
     "weight_decay": 0.01,
     "gradient_clip": 1.0,
     "mixed_precision": true,
-    "accumulation_steps": 4,
+    "accumulation_steps": 2,
     "num_patients": 500
   },
   "loss_weights": {
