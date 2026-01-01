@@ -16,6 +16,6 @@
     "perceptual": 0.1,
     "edge": 0.1,
     "deep_supervision": 0.2,
-    "frequency": 0.01
+    "frequency": 0.001
   }
 }
