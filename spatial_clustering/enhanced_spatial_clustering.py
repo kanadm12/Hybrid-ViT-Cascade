@@ -133,12 +133,6 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
             for _ in range(num_blocks)
         ])
         
-        # NEW: Hierarchical multi-scale processing
-        self.hierarchical_attention = HierarchicalAttention(
-            channels=voxel_dim,
-            scales=[32, 64]
-        )
-        
         # Volume decoder
         self.decoder = nn.Sequential(
             nn.Conv3d(voxel_dim, 128, kernel_size=3, padding=1),
@@ -242,9 +236,6 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         
         # Reshape to 3D
         x = x.transpose(1, 2).view(B, self.voxel_dim, D, H, W)
-        
-        # NEW: Hierarchical multi-scale refinement
-        x = self.hierarchical_attention(x, target_size=(D, H, W))
         
         # Decode to volume
         pred_volume = self.decoder(x)  # (B, 1, D, H, W)
