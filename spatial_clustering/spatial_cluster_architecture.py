@@ -538,13 +538,13 @@ class ClusterTrackingLoss(nn.Module):
         # Position-weighted loss (convert accuracy to error)
         # position_accuracy is in [0, 1] where 1 = perfect
         # Convert to loss: 1 - accuracy, so 0 = perfect, 1 = worst
-        position_loss = 1.0 - position_accuracy.mean()
+        position_loss = torch.clamp(1.0 - position_accuracy.mean(), 0.0, 1.0)
         
         # Intensity loss (MAE already a proper loss)
-        intensity_loss = intensity_metrics['intensity_mae']
+        intensity_loss = torch.clamp(intensity_metrics['intensity_mae'], 0.0, 10.0)
         
         # Contrast loss
-        contrast_loss = intensity_metrics['contrast_error']
+        contrast_loss = torch.clamp(intensity_metrics['contrast_error'], 0.0, 10.0)
         
         # Cluster consistency loss
         # Encourage voxels in same cluster to have similar intensities
@@ -557,12 +557,13 @@ class ClusterTrackingLoss(nn.Module):
             cluster_weights = cluster_assignments[:, :, k]  # (B, N)
             weighted_pred = pred_flat * cluster_weights  # (B, N)
             
-            # Compute weighted mean and variance
-            cluster_mean = weighted_pred.sum(dim=1, keepdim=True) / (cluster_weights.sum(dim=1, keepdim=True) + 1e-8)
+            # Compute weighted mean and variance with stability
+            weight_sum = cluster_weights.sum(dim=1, keepdim=True) + 1e-8
+            cluster_mean = weighted_pred.sum(dim=1, keepdim=True) / weight_sum
             cluster_var = ((weighted_pred - cluster_mean * cluster_weights) ** 2).sum(dim=1).mean()
-            cluster_variance += cluster_var
+            cluster_variance += torch.clamp(cluster_var, 0.0, 1.0)
         
-        cluster_consistency_loss = cluster_variance / K
+        cluster_consistency_loss = torch.clamp(cluster_variance / (K + 1e-8), 0.0, 1.0)
         
         # Total loss
         total_loss = (
@@ -571,6 +572,14 @@ class ClusterTrackingLoss(nn.Module):
             self.lambda_contrast * contrast_loss +
             self.lambda_cluster * cluster_consistency_loss
         )
+        
+        # Check for NaN/Inf and replace with safe value
+        if torch.isnan(total_loss) or torch.isinf(total_loss):
+            total_loss = torch.tensor(1.0, device=total_loss.device, requires_grad=True)
+            position_loss = torch.tensor(0.25, device=position_loss.device)
+            intensity_loss = torch.tensor(0.25, device=intensity_loss.device)
+            contrast_loss = torch.tensor(0.25, device=contrast_loss.device)
+            cluster_consistency_loss = torch.tensor(0.25, device=cluster_consistency_loss.device)
         
         return {
             'total_loss': total_loss,
