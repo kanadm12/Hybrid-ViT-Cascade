@@ -83,11 +83,13 @@ class CTDRRDataset(torch.utils.data.Dataset):
         # Load PA (frontal) DRR
         pa_path = os.path.join(patient_dir, f"{patient_id}_pa_drr.png")
         frontal = np.array(Image.open(pa_path).convert('L'))
+        frontal = np.flipud(frontal)  # FLIP VERTICALLY: shoulders below → chest above (correct anatomy)
         frontal = torch.from_numpy(frontal).float().unsqueeze(0) / 255.0
         
         # Load LAT (lateral) DRR
         lat_path = os.path.join(patient_dir, f"{patient_id}_lat_drr.png")
         lateral = np.array(Image.open(lat_path).convert('L'))
+        lateral = np.flipud(lateral)  # FLIP VERTICALLY: shoulders below → chest above (correct anatomy)
         lateral = torch.from_numpy(lateral).float().unsqueeze(0) / 255.0
         
         # Load CT volume
