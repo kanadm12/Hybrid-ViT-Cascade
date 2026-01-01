@@ -194,22 +194,26 @@ class ClusterAwareAttention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]
         
         # Cluster-compressed attention: aggregate to cluster centroids to reduce N -> K
-        # This avoids O(N^2) attention by using O(NK + K^2) instead
+        # This avoids O(N^2) attention by using O(NK) instead
         
-        # Step 1: Aggregate voxels to cluster centroids using soft assignments
+        # Step 1: Aggregate voxels to cluster centroids using efficient matmul
         # cluster_assignments: (B, N, K)
         # k, v: (B, num_heads, N, head_dim)
         
-        # Reshape for broadcasting: (B, 1, N, K, 1) for cluster weights
-        cluster_weights = cluster_assignments.unsqueeze(1).unsqueeze(-1)  # (B, 1, N, K, 1)
+        # Transpose for matmul: (B, num_heads, head_dim, N) @ (B, N, K) = (B, num_heads, head_dim, K)
+        k_t = k.transpose(-2, -1)  # (B, num_heads, head_dim, N)
+        v_t = v.transpose(-2, -1)  # (B, num_heads, head_dim, N)
         
-        # Reshape k, v: (B, num_heads, N, 1, head_dim) to broadcast with K clusters
-        k_expanded = k.unsqueeze(3)  # (B, num_heads, N, 1, head_dim)
-        v_expanded = v.unsqueeze(3)  # (B, num_heads, N, 1, head_dim)
+        # Compute cluster centroids via weighted sum (use einsum for efficiency)
+        # k: (B, num_heads, N, head_dim), cluster_assignments: (B, N, K)
+        # Want: (B, num_heads, K, head_dim)
+        k_cluster = torch.einsum('bhnc,bnk->bhkc', k, cluster_assignments)  # (B, num_heads, K, head_dim)
+        v_cluster = torch.einsum('bhnc,bnk->bhkc', v, cluster_assignments)  # (B, num_heads, K, head_dim)
         
-        # Weighted sum: (B, num_heads, N, K, head_dim) -> sum over N -> (B, num_heads, K, head_dim)
-        k_cluster = (k_expanded * cluster_weights).sum(dim=2) / (cluster_weights.sum(dim=2) + 1e-8)
-        v_cluster = (v_expanded * cluster_weights).sum(dim=2) / (cluster_weights.sum(dim=2) + 1e-8)
+        # Normalize by cluster size
+        cluster_sizes = cluster_assignments.sum(dim=1, keepdim=True).transpose(-2, -1)  # (B, 1, K, 1)
+        k_cluster = k_cluster / (cluster_sizes + 1e-8)
+        v_cluster = v_cluster / (cluster_sizes + 1e-8)
         
         # Step 2: Voxel-to-cluster attention (N x K instead of N x N)
         attn = (q @ k_cluster.transpose(-2, -1)) * (self.head_dim ** -0.5)  # (B, num_heads, N, K)
