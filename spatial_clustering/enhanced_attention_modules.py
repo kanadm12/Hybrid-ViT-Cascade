@@ -261,8 +261,8 @@ class EnhancedAttentionBlock(nn.Module):
         B, N, C = voxel_features.shape
         K = cluster_assignments.shape[-1]
         
-        # Reshape to 3D for spatial attention
-        D = int(N ** (1/3))
+        # Reshape to 3D for spatial attention (use round to avoid precision issues)
+        D = round(N ** (1/3))
         voxel_3d = voxel_features.transpose(1, 2).view(B, C, D, D, D)
         
         # Apply 3D spatial attention
