@@ -1,21 +1,21 @@
 {
   "data_dir": "/workspace/drr_patient_data",
   "save_dir": "checkpoints",
-  "batch_size": 2,
+  "batch_size": 4,
   "num_epochs": 20,
   "max_patients": 500,
-  "learning_rate": 2e-4,
-  "weight_decay": 1e-4,
-  "base_channels": 24,
+  "learning_rate": 1e-3,
+  "weight_decay": 1e-5,
+  "base_channels": 16,
   "volume_size": [64, 64, 64],
   "xray_size": 512,
   "ddp_port": 12360,
   "loss_weights": {
     "l1": 1.0,
-    "ssim": 0.3,
-    "perceptual": 0.1,
-    "edge": 0.1,
-    "deep_supervision": 0.2,
-    "frequency": 0.05
+    "ssim": 0.0,
+    "perceptual": 0.0,
+    "edge": 0.0,
+    "deep_supervision": 0.0,
+    "frequency": 0.0
   }
 }

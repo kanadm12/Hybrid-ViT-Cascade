@@ -123,6 +123,14 @@ def train_epoch(model, loader, criterion, optimizer, scaler, rank, epoch):
         # Metrics
         with torch.no_grad():
             psnr, ssim = compute_metrics(pred_ct, target_ct)
+            
+            # Debugging: check prediction statistics
+            if batch_idx == 0 and rank == 0:
+                print(f"\n[Debug] Pred range: [{pred_ct.min():.4f}, {pred_ct.max():.4f}], "
+                      f"mean: {pred_ct.mean():.4f}, std: {pred_ct.std():.4f}")
+                print(f"[Debug] Target range: [{target_ct.min():.4f}, {target_ct.max():.4f}], "
+                      f"mean: {target_ct.mean():.4f}, std: {target_ct.std():.4f}")
+                print(f"[Debug] Loss components: {', '.join([f'{k}={v:.4f}' for k,v in loss_dict.items()])}\n")
         
         total_loss += loss.item()
         total_psnr += psnr
