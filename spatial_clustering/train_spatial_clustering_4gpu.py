@@ -183,8 +183,10 @@ class SpatialClusteringTrainer:
         if local_rank == 0:
             self.checkpoint_dir = Path(self.config['logging']['checkpoint_dir'])
             self.log_dir = Path(self.config['logging']['log_dir'])
+            self.viz_dir = Path(self.config['logging'].get('viz_dir', 'visualizations/spatial_clustering'))
             self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
             self.log_dir.mkdir(parents=True, exist_ok=True)
+            self.viz_dir.mkdir(parents=True, exist_ok=True)
         
         # Metrics tracking
         self.train_metrics = {
@@ -198,6 +200,62 @@ class SpatialClusteringTrainer:
         
         if local_rank == 0:
             print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()) / 1e6:.2f}M")
+    
+    def save_visualization(self, pred_volume, gt_volume, epoch, phase='train'):
+        """Save visualization of GT vs Pred CT slices (only rank 0)"""
+        if self.local_rank != 0:
+            return
+        
+        # Take first sample from batch
+        pred = pred_volume[0, 0].detach().cpu().numpy()  # (D, H, W)
+        gt = gt_volume[0, 0].detach().cpu().numpy()  # (D, H, W)
+        
+        D, H, W = pred.shape
+        
+        # Extract middle slices
+        axial_idx = D // 2
+        sagittal_idx = W // 2
+        coronal_idx = H // 2
+        
+        # Create figure with 2 rows (GT, Pred) x 3 columns (Axial, Sagittal, Coronal)
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        fig.suptitle(f'Epoch {epoch} - {phase.upper()} | GT (top) vs Pred (bottom)', fontsize=16)
+        
+        # Row 0: Ground Truth
+        axes[0, 0].imshow(gt[axial_idx], cmap='gray', vmin=0, vmax=1)
+        axes[0, 0].set_title(f'GT Axial (z={axial_idx})')
+        axes[0, 0].axis('off')
+        
+        axes[0, 1].imshow(gt[:, :, sagittal_idx], cmap='gray', vmin=0, vmax=1)
+        axes[0, 1].set_title(f'GT Sagittal (x={sagittal_idx})')
+        axes[0, 1].axis('off')
+        
+        axes[0, 2].imshow(gt[:, coronal_idx, :], cmap='gray', vmin=0, vmax=1)
+        axes[0, 2].set_title(f'GT Coronal (y={coronal_idx})')
+        axes[0, 2].axis('off')
+        
+        # Row 1: Prediction
+        axes[1, 0].imshow(pred[axial_idx], cmap='gray', vmin=0, vmax=1)
+        axes[1, 0].set_title(f'Pred Axial (z={axial_idx})')
+        axes[1, 0].axis('off')
+        
+        axes[1, 1].imshow(pred[:, :, sagittal_idx], cmap='gray', vmin=0, vmax=1)
+        axes[1, 1].set_title(f'Pred Sagittal (x={sagittal_idx})')
+        axes[1, 1].axis('off')
+        
+        axes[1, 2].imshow(pred[:, coronal_idx, :], cmap='gray', vmin=0, vmax=1)
+        axes[1, 2].set_title(f'Pred Coronal (y={coronal_idx})')
+        axes[1, 2].axis('off')
+        
+        plt.tight_layout()
+        
+        # Save to disk
+        save_path = self.viz_dir / f'epoch_{epoch:03d}_{phase}.png'
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        plt.close(fig)
+        
+        print(f"✓ Saved visualization: {save_path}")
+
     
     def train_epoch(self, train_loader):
         """Train for one epoch"""
@@ -337,6 +395,10 @@ class SpatialClusteringTrainer:
         val_losses['ssim'] = val_ssim / len(val_loader)
         self.val_metrics['psnr'].append(val_losses['psnr'])
         self.val_metrics['ssim'].append(val_losses['ssim'])
+        
+        # Save visualization of last batch
+        if self.local_rank == 0:
+            self.save_visualization(output['pred_volume'], gt_volume, self.epoch, phase='val')
         
         return val_losses
     
