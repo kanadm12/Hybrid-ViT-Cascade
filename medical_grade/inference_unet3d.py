@@ -163,9 +163,9 @@ def main():
     
     # Load dataset
     dataset = PatientDRRDataset(
-        data_dir=args.data_dir,
-        mode='test',
-        volume_size=tuple(args.volume_size)
+        data_path=args.data_dir,
+        target_xray_size=512,
+        target_volume_size=tuple(args.volume_size)
     )
     
     num_samples = len(dataset) if args.num_samples == -1 else min(args.num_samples, len(dataset))
@@ -179,13 +179,9 @@ def main():
         for idx in tqdm(range(num_samples)):
             batch = dataset[idx]
             
-            xrays = batch['drr_stacked'].unsqueeze(0).to(device)  # (1, 2, H, W)
+            xrays = batch['drr_stacked'].unsqueeze(0).to(device)  # (1, 2, 1, H, W)
             target_ct = batch['ct_volume'].cpu().numpy()[0]  # (D, H, W)
             patient_id = batch['patient_id']
-            
-            # Reshape X-rays
-            if xrays.dim() == 4:
-                xrays = xrays.unsqueeze(2)  # (1, 2, 1, H, W)
             
             # Predict
             pred_ct, _ = model(xrays)

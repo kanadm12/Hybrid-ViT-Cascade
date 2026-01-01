@@ -87,12 +87,8 @@ def train_epoch(model, loader, criterion, optimizer, scaler, rank, epoch):
     
     for batch_idx, batch in enumerate(pbar):
         # Move to GPU
-        xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)
-        target_ct = batch['ct_volume'].cuda(rank, non_blocking=True)
-        
-        # Reshape X-rays: (B, 2, H, W) -> (B, 2, 1, H, W)
-        if xrays.dim() == 4:
-            xrays = xrays.unsqueeze(2)
+        xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)  # (B, 2, 1, H, W)
+        target_ct = batch['ct_volume'].cuda(rank, non_blocking=True)  # (B, 1, D, H, W)
         
         optimizer.zero_grad()
         
@@ -142,11 +138,8 @@ def validate(model, loader, criterion, rank):
     
     with torch.no_grad():
         for batch in loader:
-            xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)
-            target_ct = batch['ct_volume'].cuda(rank, non_blocking=True)
-            
-            if xrays.dim() == 4:
-                xrays = xrays.unsqueeze(2)
+            xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)  # (B, 2, 1, H, W)
+            target_ct = batch['ct_volume'].cuda(rank, non_blocking=True)  # (B, 1, D, H, W)
             
             with autocast():
                 pred_ct, aux_outputs = model(xrays)
@@ -237,19 +230,21 @@ def main_worker(rank, world_size, config):
     )
     
     # AMP
-    scaler = GradScaler()
+    scaler = GradScaler('cuda')
     
     # Dataset
     train_dataset = PatientDRRDataset(
-        data_dir=config['data_dir'],
-        mode='train',
-        volume_size=tuple(config['volume_size'])
+        data_path=config['data_dir'],
+        target_xray_size=config['xray_size'],
+        target_volume_size=tuple(config['volume_size']),
+        augmentation=True
     )
     
     val_dataset = PatientDRRDataset(
-        data_dir=config['data_dir'],
-        mode='val',
-        volume_size=tuple(config['volume_size'])
+        data_path=config['data_dir'],
+        target_xray_size=config['xray_size'],
+        target_volume_size=tuple(config['volume_size']),
+        augmentation=False
     )
     
     # Samplers
