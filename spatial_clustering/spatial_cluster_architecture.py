@@ -186,40 +186,39 @@ class ClusterAwareAttention(nn.Module):
             attended_features: (B, N, voxel_dim)
         """
         B, N, C = voxel_features.shape
+        K = cluster_assignments.shape[-1]  # num_clusters
         
         # Generate Q, K, V
         qkv = self.qkv(voxel_features).reshape(B, N, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B, num_heads, N, head_dim)
         q, k, v = qkv[0], qkv[1], qkv[2]
         
-        # Chunked attention to avoid OOM with large N (64³ = 262,144 voxels)
-        chunk_size = 4096
-        attn_outputs = []
+        # Cluster-compressed attention: aggregate to cluster centroids to reduce N -> K
+        # This avoids O(N^2) attention by using O(NK + K^2) instead
         
-        for i in range(0, N, chunk_size):
-            q_chunk = q[:, :, i:i+chunk_size]  # (B, num_heads, chunk, head_dim)
-            
-            # Standard attention scores for this chunk
-            attn_chunk = (q_chunk @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)  # (B, num_heads, chunk, N)
-            
-            # Compute cluster-based bias for this chunk
-            cluster_assignments_chunk = cluster_assignments[:, i:i+chunk_size]  # (B, chunk, num_clusters)
-            cluster_attn_bias = torch.matmul(
-                cluster_assignments_chunk,  # (B, chunk, num_clusters)
-                torch.matmul(self.cluster_bias, cluster_assignments.transpose(-2, -1))  # (B, num_clusters, N)
-            )  # (B, chunk, N)
-            
-            # Add cluster bias to attention (broadcast across heads)
-            attn_chunk = attn_chunk + cluster_attn_bias.unsqueeze(1)  # (B, num_heads, chunk, N)
-            
-            attn_chunk = F.softmax(attn_chunk, dim=-1)
-            
-            # Apply attention to values
-            x_chunk = (attn_chunk @ v).transpose(1, 2).reshape(B, chunk_size if i + chunk_size <= N else N - i, C)
-            attn_outputs.append(x_chunk)
+        # Step 1: Aggregate voxels to cluster centroids using soft assignments
+        cluster_weights = cluster_assignments.unsqueeze(1).unsqueeze(-1)  # (B, 1, N, K, 1)
+        k_reshaped = k.transpose(1, 2).unsqueeze(3)  # (B, N, num_heads, 1, head_dim)
+        v_reshaped = v.transpose(1, 2).unsqueeze(3)  # (B, N, num_heads, 1, head_dim)
         
-        # Concatenate all chunks
-        x = torch.cat(attn_outputs, dim=1)  # (B, N, voxel_dim)
+        # Weighted sum to get cluster centroids
+        k_cluster = (k_reshaped * cluster_weights).sum(dim=1) / (cluster_weights.sum(dim=1) + 1e-8)  # (B, K, num_heads, head_dim)
+        v_cluster = (v_reshaped * cluster_weights).sum(dim=1) / (cluster_weights.sum(dim=1) + 1e-8)  # (B, K, num_heads, head_dim)
+        
+        k_cluster = k_cluster.transpose(1, 2)  # (B, num_heads, K, head_dim)
+        v_cluster = v_cluster.transpose(1, 2)  # (B, num_heads, K, head_dim)
+        
+        # Step 2: Voxel-to-cluster attention (N x K instead of N x N)
+        attn = (q @ k_cluster.transpose(-2, -1)) * (self.head_dim ** -0.5)  # (B, num_heads, N, K)
+        
+        # Add cluster bias (K x K) - broadcast through voxels
+        cluster_bias_expanded = self.cluster_bias.unsqueeze(0).unsqueeze(1)  # (1, 1, K, K)
+        attn = attn + torch.matmul(cluster_assignments.unsqueeze(1), cluster_bias_expanded).squeeze(2)  # (B, num_heads, N, K)
+        
+        attn = F.softmax(attn, dim=-1)  # (B, num_heads, N, K)
+        
+        # Step 3: Apply attention to cluster centroids
+        x = (attn @ v_cluster).transpose(1, 2).reshape(B, N, C)  # (B, N, voxel_dim)
         x = self.proj(x)
         
         return x
