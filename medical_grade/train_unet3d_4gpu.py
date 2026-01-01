@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from tqdm import tqdm
 import nibabel as nib
+from datetime import timedelta
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -32,17 +33,19 @@ from utils.dataset import PatientDRRDataset
 from medical_grade.model_unet3d import HybridCNNViTUNet3D, MedicalGradeLoss
 
 
-def setup_ddp(rank, world_size, port=12359):
-    """Initialize DDP"""
+def setup_ddp(rank, world_size, port=12360):
+    """Initialize DDP with extended timeout"""
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = str(port)
     os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
+    os.environ['NCCL_TIMEOUT'] = '1800'  # 30 minutes
     
     dist.init_process_group(
         backend='nccl',
         init_method=f'tcp://localhost:{port}',
         world_size=world_size,
-        rank=rank
+        rank=rank,
+        timeout=timedelta(minutes=30)
     )
     torch.cuda.set_device(rank)
 
@@ -130,14 +133,17 @@ def train_epoch(model, loader, criterion, optimizer, scaler, rank, epoch):
 
 
 def validate(model, loader, criterion, rank):
-    """Validate model"""
+    """Validate model (only on rank 0 to avoid timeout)"""
+    if rank != 0:
+        return 0.0, 0.0, 0.0
+    
     model.eval()
     total_loss = 0
     total_psnr = 0
     total_ssim = 0
     
     with torch.no_grad():
-        for batch in loader:
+        for batch in tqdm(loader, desc='Validation', leave=False):
             xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)  # (B, 2, 1, H, W)
             target_ct = batch['ct_volume'].cuda(rank, non_blocking=True)  # (B, 1, D, H, W)
             
@@ -232,22 +238,29 @@ def main_worker(rank, world_size, config):
     # AMP
     scaler = GradScaler('cuda')
     
-    # Dataset
-    train_dataset = PatientDRRDataset(
-        data_path=config['data_dir'],
-        target_xray_size=config['xray_size'],
-        target_volume_size=tuple(config['volume_size']),
-        augmentation=True,
-        max_patients=config.get('max_patients', None)
-    )
-    
-    val_dataset = PatientDRRDataset(
+    # Dataset with train/val split
+    all_dataset = PatientDRRDataset(
         data_path=config['data_dir'],
         target_xray_size=config['xray_size'],
         target_volume_size=tuple(config['volume_size']),
         augmentation=False,
         max_patients=config.get('max_patients', None)
     )
+    
+    # Split into train (80%) and val (20%)
+    total_size = len(all_dataset)
+    train_size = int(0.8 * total_size)
+    val_size = total_size - train_size
+    
+    from torch.utils.data import random_split
+    train_dataset, val_dataset = random_split(
+        all_dataset, 
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)
+    )
+    
+    # Enable augmentation for train split only
+    all_dataset.augmentation = True
     
     # Samplers
     train_sampler = DistributedSampler(
