@@ -197,23 +197,27 @@ class ClusterAwareAttention(nn.Module):
         # This avoids O(N^2) attention by using O(NK + K^2) instead
         
         # Step 1: Aggregate voxels to cluster centroids using soft assignments
+        # cluster_assignments: (B, N, K)
+        # k, v: (B, num_heads, N, head_dim)
+        
+        # Reshape for broadcasting: (B, 1, N, K, 1) for cluster weights
         cluster_weights = cluster_assignments.unsqueeze(1).unsqueeze(-1)  # (B, 1, N, K, 1)
-        k_reshaped = k.transpose(1, 2).unsqueeze(3)  # (B, N, num_heads, 1, head_dim)
-        v_reshaped = v.transpose(1, 2).unsqueeze(3)  # (B, N, num_heads, 1, head_dim)
         
-        # Weighted sum to get cluster centroids
-        k_cluster = (k_reshaped * cluster_weights).sum(dim=1) / (cluster_weights.sum(dim=1) + 1e-8)  # (B, K, num_heads, head_dim)
-        v_cluster = (v_reshaped * cluster_weights).sum(dim=1) / (cluster_weights.sum(dim=1) + 1e-8)  # (B, K, num_heads, head_dim)
+        # Reshape k, v: (B, num_heads, N, 1, head_dim) to broadcast with K clusters
+        k_expanded = k.unsqueeze(3)  # (B, num_heads, N, 1, head_dim)
+        v_expanded = v.unsqueeze(3)  # (B, num_heads, N, 1, head_dim)
         
-        k_cluster = k_cluster.transpose(1, 2)  # (B, num_heads, K, head_dim)
-        v_cluster = v_cluster.transpose(1, 2)  # (B, num_heads, K, head_dim)
+        # Weighted sum: (B, num_heads, N, K, head_dim) -> sum over N -> (B, num_heads, K, head_dim)
+        k_cluster = (k_expanded * cluster_weights).sum(dim=2) / (cluster_weights.sum(dim=2) + 1e-8)
+        v_cluster = (v_expanded * cluster_weights).sum(dim=2) / (cluster_weights.sum(dim=2) + 1e-8)
         
         # Step 2: Voxel-to-cluster attention (N x K instead of N x N)
         attn = (q @ k_cluster.transpose(-2, -1)) * (self.head_dim ** -0.5)  # (B, num_heads, N, K)
         
-        # Add cluster bias (K x K) - broadcast through voxels
-        cluster_bias_expanded = self.cluster_bias.unsqueeze(0).unsqueeze(1)  # (1, 1, K, K)
-        attn = attn + torch.matmul(cluster_assignments.unsqueeze(1), cluster_bias_expanded).squeeze(2)  # (B, num_heads, N, K)
+        # Add cluster bias (K x K) - compute influence through cluster assignments
+        # cluster_assignments @ cluster_bias: (B, N, K) @ (K, K) = (B, N, K)
+        cluster_bias_term = torch.matmul(cluster_assignments, self.cluster_bias)  # (B, N, K)
+        attn = attn + cluster_bias_term.unsqueeze(1)  # Broadcast across heads
         
         attn = F.softmax(attn, dim=-1)  # (B, num_heads, N, K)
         
