@@ -281,7 +281,9 @@ class PositionIntensityTracker(nn.Module):
         position_weights = position_weights.unsqueeze(0).expand(B, -1, -1, -1)  # (B, D, H, W)
         
         # Position-weighted accuracy (lower error = higher accuracy)
-        position_accuracy = position_weights * (1.0 - voxel_error)
+        # Clamp voxel_error to [0, 1] to ensure accuracy stays in [0, 1]
+        voxel_error_clamped = torch.clamp(voxel_error, 0.0, 1.0)
+        position_accuracy = position_weights * (1.0 - voxel_error_clamped)
         
         return position_accuracy
     
@@ -533,10 +535,12 @@ class ClusterTrackingLoss(nn.Module):
         Returns:
             loss_dict: Dictionary of losses and metrics
         """
-        # Position-weighted loss
-        position_loss = -position_accuracy.mean()  # Negative because higher accuracy = better
+        # Position-weighted loss (convert accuracy to error)
+        # position_accuracy is in [0, 1] where 1 = perfect
+        # Convert to loss: 1 - accuracy, so 0 = perfect, 1 = worst
+        position_loss = 1.0 - position_accuracy.mean()
         
-        # Intensity loss
+        # Intensity loss (MAE already a proper loss)
         intensity_loss = intensity_metrics['intensity_mae']
         
         # Contrast loss
