@@ -23,9 +23,9 @@ import nibabel as nib
 from PIL import Image
 
 from spatial_cluster_architecture import (
-    SpatialClusteringCTGenerator,
     ClusterTrackingLoss
 )
+from enhanced_spatial_clustering import EnhancedSpatialClusteringCTGenerator
 
 
 def compute_psnr(pred, target, data_range=1.0):
@@ -132,7 +132,7 @@ class SpatialClusteringTrainer:
             print(f"Using {dist.get_world_size()} GPUs")
         
         # Create model
-        self.model = SpatialClusteringCTGenerator(
+        self.model = EnhancedSpatialClusteringCTGenerator(
             volume_size=tuple(self.config['model']['volume_size']),
             voxel_dim=self.config['model']['voxel_dim'],
             num_clusters=self.config['model']['num_clusters'],
@@ -351,7 +351,8 @@ class SpatialClusteringTrainer:
             'scheduler_state_dict': self.scheduler.state_dict(),
             'config': self.config,
             'train_metrics': self.train_metrics,
-            'val_metrics': self.val_metrics
+            'val_metrics': self.val_metrics,
+            'best_val_loss': self.best_val_loss
         }
         
         torch.save(checkpoint, self.checkpoint_dir / 'latest.pth')
@@ -363,11 +364,38 @@ class SpatialClusteringTrainer:
             torch.save(checkpoint, self.checkpoint_dir / 'best.pth')
             print(f"✓ Saved best model at epoch {self.epoch}")
     
-    def train(self, train_loader, val_loader):
+    def load_checkpoint(self, checkpoint_path: str):
+        """Load model checkpoint and resume training"""
+        if self.local_rank == 0:
+            print(f"Loading checkpoint from {checkpoint_path}...")
+        
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.model.module.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.epoch = checkpoint['epoch'] + 1  # Start from next epoch
+        self.global_step = checkpoint['global_step']
+        self.train_metrics = checkpoint['train_metrics']
+        self.val_metrics = checkpoint['val_metrics']
+        self.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
+        
+        if self.local_rank == 0:
+            print(f"✓ Resumed from epoch {checkpoint['epoch']}, step {self.global_step}")
+            print(f"✓ Best val loss so far: {self.best_val_loss:.6f}")
+    
+    def train(self, train_loader, val_loader, resume_from: str = None):
         """Main training loop"""
+        
+        # Load checkpoint if resuming
+        if resume_from and os.path.exists(resume_from):
+            self.load_checkpoint(resume_from)
+        
         if self.local_rank == 0:
             print("\n" + "="*80)
-            print("Starting 4-GPU training...")
+            if resume_from:
+                print(f"Resuming 4-GPU training from epoch {self.epoch}...")
+            else:
+                print("Starting 4-GPU training with ENHANCED ATTENTION...")
             print("="*80 + "\n")
         
         for epoch in range(self.epoch, self.config['training']['num_epochs']):
@@ -466,10 +494,32 @@ def main():
         print(f"  Per-GPU batch size: 2")
         print(f"  Effective batch size: 8 (2 x 4 GPUs)")
         print(f"  Total epochs: 20")
-        print(f"  Batches per epoch: {len(train_loader)}\n")
+        print(f"  Batches per epoch: {len(train_loader)}")
+        print(f"\n🚀 ENHANCED MODEL with ALL attention mechanisms:")
+        print(f"  ✓ Cross-Modal Attention (Frontal ↔ Lateral)")
+        print(f"  ✓ 3D Spatial Attention")
+        print(f"  ✓ Channel Attention")
+        print(f"  ✓ Hierarchical Multi-Scale")
+        print(f"  ✓ Cluster Interaction Attention\n")
+    
+    # Check for best checkpoint to resume from
+    checkpoint_dir = Path('checkpoints/spatial_clustering')
+    resume_from = None
+    if checkpoint_dir.exists() and (checkpoint_dir / 'best.pth').exists():
+        if local_rank == 0:
+            response = input("Found existing checkpoint. Resume from best.pth? (y/n): ")
+            if response.lower() == 'y':
+                resume_from = str(checkpoint_dir / 'best.pth')
+    
+    # Broadcast resume decision to all ranks
+    if dist.get_world_size() > 1:
+        resume_tensor = torch.tensor(1 if resume_from else 0, device=torch.device(f'cuda:{local_rank}'))
+        dist.broadcast(resume_tensor, src=0)
+        if local_rank != 0 and resume_tensor.item() == 1:
+            resume_from = str(checkpoint_dir / 'best.pth')
     
     # Train
-    trainer.train(train_loader, val_loader)
+    trainer.train(train_loader, val_loader, resume_from=resume_from)
     
     # Cleanup
     dist.destroy_process_group()
