@@ -1,41 +1,20 @@
 {
-  "model": {
-    "volume_size": [64, 64, 64],
-    "xray_size": 512,
-    "base_channels": 32
-  },
-  
-  "data": {
-    "dataset_path": "/workspace/drr_patient_data",
-    "max_patients": null,
-    "num_workers": 4
-  },
-  
-  "training": {
-    "batch_size": 2,
-    "num_epochs": 60,
-    "learning_rate": 1e-4,
-    "weight_decay": 1e-5,
-    "gradient_clip": 1.0,
-    "use_amp": true,
-    "warmup_epochs": 5
-  },
-  
-  "loss": {
-    "l1_weight": 1.0,
-    "ssim_weight": 0.3,
-    "perceptual_weight": 0.2,
-    "edge_weight": 0.2,
-    "deep_supervision_weight": 0.2,
-    "frequency_weight": 0.3
-  },
-  
-  "checkpoint": {
-    "save_dir": "medical_grade/checkpoints_unet3d",
-    "save_interval": 5
-  },
-  
-  "logging": {
-    "print_interval": 10
+  "data_dir": "../data/patients_64",
+  "save_dir": "checkpoints",
+  "batch_size": 2,
+  "num_epochs": 60,
+  "learning_rate": 1e-4,
+  "weight_decay": 1e-4,
+  "base_channels": 32,
+  "volume_size": [64, 64, 64],
+  "xray_size": 512,
+  "ddp_port": 12359,
+  "loss_weights": {
+    "l1": 1.0,
+    "ssim": 0.3,
+    "perceptual": 0.2,
+    "edge": 0.2,
+    "deep_supervision": 0.2,
+    "frequency": 0.3
   }
 }
