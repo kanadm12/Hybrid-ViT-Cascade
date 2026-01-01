@@ -13,8 +13,7 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
-from torch.cuda.amp import autocast
-from torch.amp import GradScaler
+from torch.amp import autocast, GradScaler
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 import numpy as np
@@ -94,7 +93,7 @@ def train_epoch(model, loader, criterion, optimizer, scaler, rank, epoch):
         optimizer.zero_grad()
         
         # Forward with mixed precision
-        with autocast():
+        with autocast('cuda'):
             pred_ct, aux_outputs = model(xrays)
             loss, loss_dict = criterion(pred_ct, target_ct, aux_outputs)
         
@@ -142,7 +141,7 @@ def validate(model, loader, criterion, rank):
             xrays = batch['drr_stacked'].cuda(rank, non_blocking=True)  # (B, 2, 1, H, W)
             target_ct = batch['ct_volume'].cuda(rank, non_blocking=True)  # (B, 1, D, H, W)
             
-            with autocast():
+            with autocast('cuda'):
                 pred_ct, aux_outputs = model(xrays)
                 loss, loss_dict = criterion(pred_ct, target_ct, aux_outputs)
             
@@ -197,7 +196,7 @@ def main_worker(rank, world_size, config):
     ).cuda(rank)
     
     # Wrap with DDP
-    model = DDP(model, device_ids=[rank], find_unused_parameters=True)
+    model = DDP(model, device_ids=[rank], find_unused_parameters=False)
     
     if rank == 0:
         total_params = sum(p.numel() for p in model.parameters())

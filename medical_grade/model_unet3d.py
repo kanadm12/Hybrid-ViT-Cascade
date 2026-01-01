@@ -758,9 +758,13 @@ class MedicalGradeLoss(nn.Module):
         return loss / 3
     
     def frequency_loss(self, pred, target):
-        """High-frequency emphasis in FFT domain"""
-        pred_fft = torch.fft.fftn(pred, dim=(-3, -2, -1))
-        target_fft = torch.fft.fftn(target, dim=(-3, -2, -1))
+        """High-frequency emphasis in FFT domain (computed in float32)"""
+        # Cast to float32 for FFT stability
+        pred_f32 = pred.float()
+        target_f32 = target.float()
+        
+        pred_fft = torch.fft.fftn(pred_f32, dim=(-3, -2, -1))
+        target_fft = torch.fft.fftn(target_f32, dim=(-3, -2, -1))
         
         # High-pass filter
         D, H, W = pred.shape[-3:]
