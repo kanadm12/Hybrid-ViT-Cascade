@@ -650,13 +650,13 @@ class HybridCNNViTUNet3D(nn.Module):
         out_dec2 = self.output_dec2(dec2)
         out_final = self.output_final(dec1)
         
-        # Clamp to valid range
-        out_final = torch.clamp(out_final, 0, 1)
+        # Use tanh activation to match [-1, 1] target range
+        out_final = torch.tanh(out_final)
         
         aux_outputs = {
-            'output_dec4': out_dec4,
-            'output_dec3': out_dec3,
-            'output_dec2': out_dec2,
+            'output_dec4': torch.tanh(out_dec4),
+            'output_dec3': torch.tanh(out_dec3),
+            'output_dec2': torch.tanh(out_dec2),
             'output_final': out_final
         }
         
