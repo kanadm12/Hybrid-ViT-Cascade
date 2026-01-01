@@ -69,8 +69,24 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         # NEW: Cross-modal attention between X-ray views
         self.cross_modal_attention = CrossModalAttention(feature_dim=256*8*8, num_heads=8)
         
-        # Fusion layer
-        self.fusion = nn.Linear(256*8*8*2, voxel_dim * self.num_voxels)
+        # Efficient fusion with smaller intermediate projection
+        fusion_dim = 1024  # Bottleneck dimension
+        self.fusion = nn.Sequential(
+            nn.Linear(256*8*8*2, fusion_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(fusion_dim, fusion_dim),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Project to 3D volume via reshape + conv
+        self.to_volume = nn.Sequential(
+            nn.Linear(fusion_dim, voxel_dim * 16 * 16 * 16),  # Smaller initial volume
+            nn.Unflatten(1, (voxel_dim, 16, 16, 16)),
+            nn.ConvTranspose3d(voxel_dim, voxel_dim, kernel_size=4, stride=2, padding=1),  # 16 -> 32
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose3d(voxel_dim, voxel_dim, kernel_size=4, stride=2, padding=1),  # 32 -> 64
+            nn.ReLU(inplace=True)
+        )
         
         # Position encoding
         self.position_encoder = PositionEncodingModule(volume_size)
@@ -169,9 +185,14 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         # Fuse both views
         fused = torch.cat([frontal_attended, lateral_attended], dim=1)  # (B, 256*64*2)
         
-        # Project to voxel features
-        x = self.fusion(fused)  # (B, voxel_dim * N)
-        x = x.view(B, self.num_voxels, self.voxel_dim)  # (B, N, voxel_dim)
+        # Efficient fusion through bottleneck
+        fused_features = self.fusion(fused)  # (B, fusion_dim)
+        
+        # Project to 3D volume
+        x_3d = self.to_volume(fused_features)  # (B, voxel_dim, D, H, W)
+        
+        # Flatten to voxel sequence
+        x = x_3d.view(B, self.voxel_dim, self.num_voxels).transpose(1, 2)  # (B, N, voxel_dim)
         
         # Position encoding
         position_features = self.position_encoder()  # (N, 128)
