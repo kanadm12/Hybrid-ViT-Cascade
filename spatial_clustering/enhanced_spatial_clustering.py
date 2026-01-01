@@ -251,7 +251,7 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         
         # Tracking metrics
         if gt_volume is not None:
-            position_accuracy = self.tracker.compute_position_accuracy(pred_volume, gt_volume)
+            position_accuracy = self.tracker.compute_position_accuracy(pred_volume, gt_volume, self.volume_size)
             intensity_metrics = self.tracker.compute_intensity_accuracy(pred_volume, gt_volume)
         else:
             position_accuracy = torch.zeros(B, D, H, W, device=pred_volume.device)
