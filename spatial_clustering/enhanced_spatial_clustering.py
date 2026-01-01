@@ -120,7 +120,7 @@ class EnhancedSpatialClusteringCTGenerator(nn.Module):
         self.blocks = nn.ModuleList([
             nn.ModuleDict({
                 'norm1': nn.LayerNorm(voxel_dim),
-                'cluster_attn': ClusterAwareAttention(voxel_dim, num_clusters, num_heads),
+                'cluster_attn': ClusterAwareAttention(voxel_dim, num_heads=num_heads, num_clusters=num_clusters),
                 'channel_attn': ChannelAttention(voxel_dim),  # NEW
                 'norm2': nn.LayerNorm(voxel_dim),
                 'ffn': nn.Sequential(
