@@ -61,17 +61,27 @@ def compute_metrics(pred, target):
     mse = torch.mean((pred - target) ** 2)
     psnr = 10 * torch.log10(1.0 / (mse + 1e-8))
     
-    # SSIM (simplified)
-    mu_x = torch.mean(pred)
-    mu_y = torch.mean(target)
-    sigma_x = torch.std(pred)
-    sigma_y = torch.std(target)
-    sigma_xy = torch.mean((pred - mu_x) * (target - mu_y))
+    # SSIM (simplified but more robust)
+    # Flatten spatial dimensions
+    pred_flat = pred.view(pred.size(0), -1)  # (B, D*H*W)
+    target_flat = target.view(target.size(0), -1)
     
-    C1 = 0.01 ** 2
-    C2 = 0.03 ** 2
+    # Compute per-sample statistics
+    mu_x = pred_flat.mean(dim=1, keepdim=True)
+    mu_y = target_flat.mean(dim=1, keepdim=True)
+    
+    sigma_x = pred_flat.std(dim=1, keepdim=True)
+    sigma_y = target_flat.std(dim=1, keepdim=True)
+    sigma_xy = ((pred_flat - mu_x) * (target_flat - mu_y)).mean(dim=1, keepdim=True)
+    
+    C1 = (0.01) ** 2
+    C2 = (0.03) ** 2
+    
     ssim = ((2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2)) / \
            ((mu_x ** 2 + mu_y ** 2 + C1) * (sigma_x ** 2 + sigma_y ** 2 + C2))
+    
+    # Clamp to [0, 1] and take mean across batch
+    ssim = torch.clamp(ssim.mean(), 0.0, 1.0)
     
     return psnr.item(), ssim.item()
 
