@@ -133,6 +133,10 @@ class ImprovedRefinementNetwork(nn.Module):
             ResidualBlock3D(base_channels // 2),
             nn.Conv3d(base_channels // 2, 1, 3, padding=1)
         )
+        
+        # Initialize final conv to near-zero output (start with identity-like behavior)
+        nn.init.zeros_(self.final_refine[-1].weight)
+        nn.init.zeros_(self.final_refine[-1].bias)
     
     def forward(self, coarse_volume: torch.Tensor) -> torch.Tensor:
         """
