@@ -17,20 +17,20 @@
     }
   },
   "training": {
-    "batch_size": 1,
+    "batch_size": 2,
     "num_epochs": 20,
-    "learning_rate": 0.0001,
+    "learning_rate": 0.001,
     "weight_decay": 0.01,
     "gradient_clip": 1.0,
     "mixed_precision": true,
-    "accumulation_steps": 4,
+    "accumulation_steps": 1,
     "num_patients": 500
   },
   "loss_weights": {
-    "lambda_position": 1.0,
-    "lambda_intensity": 1.0,
-    "lambda_contrast": 0.5,
-    "lambda_cluster": 0.3
+    "lambda_position": 0.5,
+    "lambda_intensity": 2.0,
+    "lambda_contrast": 1.0,
+    "lambda_cluster": 0.1
   },
   "data": {
     "data_dir": "../data",
