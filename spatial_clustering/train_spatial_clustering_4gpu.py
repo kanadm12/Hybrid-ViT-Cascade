@@ -264,6 +264,9 @@ class SpatialClusteringTrainer:
         epoch_psnr = 0.0
         epoch_ssim = 0.0
         
+        # Initialize gradients to zero at epoch start
+        self.optimizer.zero_grad()
+        
         if self.local_rank == 0:
             pbar = tqdm(train_loader, desc=f"Epoch {self.epoch}")
         else:
@@ -289,14 +292,19 @@ class SpatialClusteringTrainer:
                 self.scaler.scale(loss).backward()
                 
                 if (batch_idx + 1) % self.config['training']['accumulation_steps'] == 0:
+                    # Unscale gradients for clipping
                     self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(),
                         self.config['training']['gradient_clip']
                     )
+                    # Step optimizer (scaler may skip if inf/nan gradients)
                     self.scaler.step(self.optimizer)
+                    # Update scaler scale factor
                     self.scaler.update()
+                    # Zero gradients for next accumulation
                     self.optimizer.zero_grad()
+                    # Step scheduler
                     self.scheduler.step()
             else:
                 output = self.model(frontal_xray, lateral_xray, gt_volume)
