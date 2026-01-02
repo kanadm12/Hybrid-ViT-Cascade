@@ -243,6 +243,20 @@ class PerceptualLoss(nn.Module):
         # Freeze
         for param in self.features.parameters():
             param.requires_grad = False
+        
+        # ImageNet normalization
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+    
+    def normalize(self, x):
+        """Normalize CT values [0, 1] to ImageNet distribution"""
+        # Clamp to [0, 1] range
+        x = torch.clamp(x, 0, 1)
+        # Repeat channels for RGB
+        x = x.repeat(1, 3, 1, 1)
+        # Normalize
+        x = (x - self.mean) / self.std
+        return x
     
     def forward(self, pred, target):
         # Sample middle slices along each axis
@@ -255,9 +269,9 @@ class PerceptualLoss(nn.Module):
         pred_slices.append(pred[:, :, D//2, :, :])
         target_slices.append(target[:, :, D//2, :, :])
         
-        # Repeat channels for VGG (grayscale → RGB)
-        pred_slices = [s.repeat(1, 3, 1, 1) for s in pred_slices]
-        target_slices = [s.repeat(1, 3, 1, 1) for s in target_slices]
+        # Normalize for VGG
+        pred_slices = [self.normalize(s) for s in pred_slices]
+        target_slices = [self.normalize(s) for s in target_slices]
         
         loss = 0
         for pred_s, target_s in zip(pred_slices, target_slices):
