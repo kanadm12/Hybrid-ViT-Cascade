@@ -272,7 +272,7 @@ class SpatialClusteringTrainer:
         for batch_idx, batch in enumerate(pbar):
             # Zero gradients before first backward (only for batch 0)
             if batch_idx == 0:
-                self.optimizer.zero_grad(set_to_none=True)
+                self.optimizer.zero_grad()
             
             frontal_xray = batch['frontal'].to(self.device)
             lateral_xray = batch['lateral'].to(self.device)
