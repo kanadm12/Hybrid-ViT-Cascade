@@ -106,9 +106,17 @@ def create_comparison_plot(xrays, prediction, target, patient_idx, output_dir):
     else:
         target = target.cpu().numpy()
     
-    # X-rays (frontal and lateral)
-    xray_frontal = xrays[0, 0].cpu().numpy() if xrays.dim() == 4 else xrays[0].cpu().numpy()
-    xray_lateral = xrays[0, 1].cpu().numpy() if xrays.shape[1] > 1 else xray_frontal
+    # X-rays (frontal and lateral) - handle batch and channel dimensions
+    # Expected shape: (batch_size, num_views, channels, height, width)
+    if xrays.dim() == 5:
+        xray_frontal = xrays[0, 0, 0].cpu().numpy()  # [batch, view0, channel0]
+        xray_lateral = xrays[0, 1, 0].cpu().numpy() if xrays.shape[1] > 1 else xray_frontal
+    elif xrays.dim() == 4:
+        xray_frontal = xrays[0, 0].cpu().numpy()  # [batch, view0]
+        xray_lateral = xrays[0, 1].cpu().numpy() if xrays.shape[1] > 1 else xray_frontal
+    else:
+        xray_frontal = xrays[0].cpu().numpy()
+        xray_lateral = xray_frontal
     
     axes[0, 0].imshow(xray_frontal, cmap='gray')
     axes[0, 0].set_title('Frontal X-ray')
