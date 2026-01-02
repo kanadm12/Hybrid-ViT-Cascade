@@ -203,13 +203,11 @@ def train_ddp(rank, world_size, config):
         weight_decay=config['training']['weight_decay']
     )
     
-    # Learning rate scheduler (OneCycle)
-    total_steps = config['training']['num_epochs'] * 100  # Approximate
-    scheduler = OneCycleLR(
+    # Learning rate scheduler (CosineAnnealing like 64³ model)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        max_lr=config['training']['learning_rate'],
-        total_steps=total_steps,
-        pct_start=config['training']['warmup_epochs'] / config['training']['num_epochs']
+        T_max=config['training']['num_epochs'],
+        eta_min=1e-7
     )
     
     scaler = torch.amp.GradScaler('cuda')
@@ -276,8 +274,6 @@ def train_ddp(rank, world_size, config):
             model, train_loader, optimizer, scaler, rank, epoch, config
         )
         
-        scheduler.step()
-        
         if rank == 0:
             print(f"\nEpoch {epoch} Training:")
             print(f"  Total Loss: {train_losses['total']:.4f}")
@@ -307,6 +303,9 @@ def train_ddp(rank, world_size, config):
                     print(f"  ✓ New best model! PSNR: {best_psnr:.2f} dB")
         
         # Save checkpoint
+        
+        # Step scheduler after validation
+        scheduler.step()
         if rank == 0 and epoch % config['logging']['save_checkpoint_interval'] == 0:
             Path(config['checkpoint_dir']).mkdir(exist_ok=True)
             torch.save({
