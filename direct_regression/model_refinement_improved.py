@@ -128,7 +128,7 @@ class ImprovedRefinementNetwork(nn.Module):
         
         self.stage2_attention = AttentionBlock3D(base_channels // 2)
         
-        # Final refinement - predict full volume directly
+        # Final refinement - predict residual correction
         self.final_refine = nn.Sequential(
             ResidualBlock3D(base_channels // 2),
             nn.Conv3d(base_channels // 2, 1, 3, padding=1)
@@ -154,8 +154,19 @@ class ImprovedRefinementNetwork(nn.Module):
         x = self.upsample2(x)
         x = self.stage2_attention(x)
         
-        # Predict refined volume directly (no residual)
-        refined = self.final_refine(x)
+        # Predict correction (no scaling)
+        correction = self.final_refine(x)
+        
+        # Upscale base prediction with trilinear
+        base_upsampled = F.interpolate(
+            coarse_volume, 
+            scale_factor=4, 
+            mode='trilinear', 
+            align_corners=True
+        )
+        
+        # Add residual correction (1:1, no scaling)
+        refined = base_upsampled + correction
         
         return refined
 
