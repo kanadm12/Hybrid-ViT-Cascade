@@ -162,9 +162,6 @@ class SpatialClusteringTrainer:
             eps=self.config['optimizer']['eps']
         )
         
-        # Initialize gradients to zero
-        self.optimizer.zero_grad()
-        
         # Scheduler
         if self.config['scheduler']['type'] == 'CosineAnnealingWarmRestarts':
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
