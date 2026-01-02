@@ -162,6 +162,9 @@ class SpatialClusteringTrainer:
             eps=self.config['optimizer']['eps']
         )
         
+        # Initialize gradients to zero
+        self.optimizer.zero_grad()
+        
         # Scheduler
         if self.config['scheduler']['type'] == 'CosineAnnealingWarmRestarts':
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
@@ -264,9 +267,6 @@ class SpatialClusteringTrainer:
         epoch_psnr = 0.0
         epoch_ssim = 0.0
         
-        # Initialize gradients to zero at epoch start
-        self.optimizer.zero_grad()
-        
         if self.local_rank == 0:
             pbar = tqdm(train_loader, desc=f"Epoch {self.epoch}")
         else:
@@ -277,7 +277,7 @@ class SpatialClusteringTrainer:
             lateral_xray = batch['lateral'].to(self.device)
             gt_volume = batch['volume'].to(self.device)
             
-            # Forward pass
+            # Forward pass with mixed precision
             if self.scaler:
                 with autocast():
                     output = self.model(frontal_xray, lateral_xray, gt_volume)
@@ -289,22 +289,25 @@ class SpatialClusteringTrainer:
                     )
                     loss = loss_dict['total_loss'] / self.config['training']['accumulation_steps']
                 
+                # Scale loss and backward
                 self.scaler.scale(loss).backward()
                 
+                # Optimizer step with gradient accumulation
                 if (batch_idx + 1) % self.config['training']['accumulation_steps'] == 0:
-                    # Unscale gradients for clipping
+                    # Unscale for gradient clipping
                     self.scaler.unscale_(self.optimizer)
+                    # Clip gradients
                     torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(),
                         self.config['training']['gradient_clip']
                     )
-                    # Step optimizer (scaler may skip if inf/nan gradients)
+                    # Optimizer step
                     self.scaler.step(self.optimizer)
-                    # Update scaler scale factor
+                    # Update scaler
                     self.scaler.update()
-                    # Zero gradients for next accumulation
+                    # Zero gradients
                     self.optimizer.zero_grad()
-                    # Step scheduler
+                    # Scheduler step
                     self.scheduler.step()
             else:
                 output = self.model(frontal_xray, lateral_xray, gt_volume)
