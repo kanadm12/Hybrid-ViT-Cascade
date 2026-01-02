@@ -18,7 +18,8 @@ import time
 
 sys.path.insert(0, '..')
 
-from model_enhanced import EnhancedDirectModel, RefinementNetwork, PerceptualLoss, EdgeAwareLoss
+from model_direct import DirectCTRegression
+from model_enhanced import RefinementNetwork, PerceptualLoss, EdgeAwareLoss
 from utils.dataset import PatientDRRDataset
 
 
@@ -61,7 +62,7 @@ def train_epoch(base_model, refinement, dataloader, criterion_dict, optimizer, s
         with torch.amp.autocast('cuda'):
             # Get 64³ prediction from frozen base model
             with torch.no_grad():
-                predicted_64, _ = base_model(xrays)
+                predicted_64 = base_model(xrays)  # DirectCTRegression returns only volume
             
             # Refine to 256³
             predicted_256 = refinement(predicted_64)
@@ -130,7 +131,7 @@ def validate(base_model, refinement, dataloader, criterion_dict, rank):
             
             with torch.amp.autocast('cuda'):
                 # Base prediction
-                predicted_64, _ = base_model(xrays)
+                predicted_64 = base_model(xrays)  # DirectCTRegression returns only volume
                 
                 # Refinement
                 predicted_256 = refinement(predicted_64)
@@ -171,13 +172,21 @@ def train_refinement_ddp(rank, world_size, config):
         print(f"Stage 2: Refinement Network Training (64³ → 256³)")
         print(f"{'='*60}")
     
-    # Load frozen base model
-    base_model = EnhancedDirectModel(
-        volume_size=(64, 64, 64),
-        base_channels=config['model']['base_channels']
+    # Load frozen base model (DirectCTRegression)
+    checkpoint = torch.load(config['base_model_checkpoint'], map_location=f'cuda:{rank}')
+    
+    # Get model config from checkpoint
+    model_config = checkpoint['config']['model']
+    
+    base_model = DirectCTRegression(
+        volume_size=tuple(model_config['volume_size']),
+        xray_img_size=model_config['xray_img_size'],
+        voxel_dim=model_config['voxel_dim'],
+        vit_depth=model_config['vit_depth'],
+        num_heads=model_config['num_heads'],
+        xray_feature_dim=model_config['xray_feature_dim']
     ).cuda(rank)
     
-    checkpoint = torch.load(config['base_model_checkpoint'])
     base_model.load_state_dict(checkpoint['model_state_dict'])
     base_model.eval()
     
