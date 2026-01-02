@@ -256,14 +256,14 @@ def train_ddp(rank, world_size, config, resume_checkpoint=None):
     train_loader = DataLoader(
         train_dataset,
         batch_size=config['training']['batch_size'],
-        sampler=best_psnr  # Use loaded value if resuming
+        sampler=train_sampler,
+        num_workers=config['data']['num_workers'],
+        pin_memory=True,
+        persistent_workers=True if config['data']['num_workers'] > 0 else False
+    )
     
-    if rank == 0:
-        print(f"\n{'='*60}")
-        print(f"Starting Training from Epoch {start_epoch}")
-        print(f"{'='*60}\n")
-    
-    for epoch in range(start_epoch
+    val_loader = DataLoader(
+        val_dataset,
         batch_size=config['training']['batch_size'],
         sampler=val_sampler,
         num_workers=config['data']['num_workers'],
@@ -272,14 +272,14 @@ def train_ddp(rank, world_size, config, resume_checkpoint=None):
     )
     
     # Training loop
-    best_psnr = 0
+    best_psnr = best_psnr  # Use loaded value if resuming
     
     if rank == 0:
         print(f"\n{'='*60}")
-        print(f"Starting Training")
+        print(f"Starting Training from Epoch {start_epoch}")
         print(f"{'='*60}\n")
     
-    for epoch in range(1, config['training']['num_epochs'] + 1):
+    for epoch in range(start_epoch, config['training']['num_epochs'] + 1):
         train_sampler.set_epoch(epoch)
         
         if rank == 0:
