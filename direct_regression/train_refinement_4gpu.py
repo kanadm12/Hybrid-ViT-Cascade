@@ -227,20 +227,30 @@ def train_refinement_ddp(rank, world_size, config):
     scaler = torch.amp.GradScaler('cuda')
     
     # Datasets (need 256³ targets)
-    # TODO: Modify dataset to return 256³ targets
-    train_dataset = PatientDRRDataset(
+    # Load full dataset and split into train/val (80/20)
+    full_dataset = PatientDRRDataset(
         data_path=config['data']['dataset_path'],
         target_xray_size=512,
         target_volume_size=(256, 256, 256),  # 256³
         max_patients=config['data']['max_patients']
     )
     
-    val_dataset = PatientDRRDataset(
-        data_path=config['data']['dataset_path'],
-        target_xray_size=512,
-        target_volume_size=(256, 256, 256),
-        max_patients=100
-    )
+    # 80/20 train/val split
+    total_size = len(full_dataset)
+    train_size = int(0.8 * total_size)
+    val_size = total_size - train_size
+    
+    # Create indices for split
+    indices = list(range(total_size))
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:]
+    
+    # Create subsets
+    train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
+    
+    if rank == 0:
+        print(f"\nDataset split: {train_size} train, {val_size} val (from {total_size} total patients)")
     
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
