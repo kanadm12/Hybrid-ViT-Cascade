@@ -131,12 +131,11 @@ class ImprovedRefinementNetwork(nn.Module):
         # Final refinement
         self.final_refine = nn.Sequential(
             ResidualBlock3D(base_channels // 2),
-            nn.Conv3d(base_channels // 2, 1, 3, padding=1),
-            nn.Tanh()  # Predict correction in [-1, 1]
+            nn.Conv3d(base_channels // 2, 1, 3, padding=1)
         )
         
-        # Scale for residual correction
-        self.correction_scale = nn.Parameter(torch.tensor(0.1))
+        # Scale for residual correction (learnable, initialized to 0.3)
+        self.correction_scale = nn.Parameter(torch.tensor(0.3))
     
     def forward(self, coarse_volume: torch.Tensor) -> torch.Tensor:
         """
@@ -234,7 +233,11 @@ class PerceptualLoss(nn.Module):
     
     def __init__(self):
         super().__init__()
-        vgg = vgg16(pretrained=True)
+        try:
+            from torchvision.models import VGG16_Weights
+            vgg = vgg16(weights=VGG16_Weights.IMAGENET1K_V1)
+        except:
+            vgg = vgg16(pretrained=True)
         self.features = nn.Sequential(*list(vgg.features)[:16]).eval()
         
         # Freeze
