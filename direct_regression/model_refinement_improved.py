@@ -128,14 +128,11 @@ class ImprovedRefinementNetwork(nn.Module):
         
         self.stage2_attention = AttentionBlock3D(base_channels // 2)
         
-        # Final refinement
+        # Final refinement - predict full volume directly
         self.final_refine = nn.Sequential(
             ResidualBlock3D(base_channels // 2),
             nn.Conv3d(base_channels // 2, 1, 3, padding=1)
         )
-        
-        # Scale for residual correction (learnable, initialized to 0.3)
-        self.correction_scale = nn.Parameter(torch.tensor(0.3))
     
     def forward(self, coarse_volume: torch.Tensor) -> torch.Tensor:
         """
@@ -157,20 +154,8 @@ class ImprovedRefinementNetwork(nn.Module):
         x = self.upsample2(x)
         x = self.stage2_attention(x)
         
-        # Predict correction
-        correction = self.final_refine(x)
-        correction = correction * self.correction_scale
-        
-        # Upscale base prediction with trilinear
-        base_upsampled = F.interpolate(
-            coarse_volume, 
-            scale_factor=4, 
-            mode='trilinear', 
-            align_corners=True
-        )
-        
-        # Add residual correction
-        refined = base_upsampled + correction
+        # Predict refined volume directly (no residual)
+        refined = self.final_refine(x)
         
         return refined
 
