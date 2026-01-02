@@ -188,8 +188,9 @@ def train_ddp(rank, world_size, config, resume_from=None):
             print(f"Resuming from epoch {checkpoint['epoch']}")
             print(f"Best PSNR so far: {best_psnr:.2f} dB")
     
-    # Datasets
-    train_dataset = PatientDRRDataset(
+    # Datasets with proper train/val split
+    # Load all available patients first
+    full_dataset = PatientDRRDataset(
         data_path=config['data']['dataset_path'],
         target_xray_size=512,
         target_volume_size=tuple(config['model']['volume_size']),
@@ -197,13 +198,22 @@ def train_ddp(rank, world_size, config, resume_from=None):
         validate_alignment=False
     )
     
-    val_dataset = PatientDRRDataset(
-        data_path=config['data']['dataset_path'],
-        target_xray_size=512,
-        target_volume_size=tuple(config['model']['volume_size']),
-        max_patients=min(50, config['data']['max_patients']),  # Use subset for validation
-        validate_alignment=False
-    )
+    # Split into train (80%) and val (20%)
+    from torch.utils.data import Subset
+    total_patients = len(full_dataset)
+    train_size = int(0.8 * total_patients)
+    
+    train_indices = list(range(0, train_size))
+    val_indices = list(range(train_size, total_patients))
+    
+    train_dataset = Subset(full_dataset, train_indices)
+    val_dataset = Subset(full_dataset, val_indices)
+    
+    if rank == 0:
+        print(f"\nDataset split:")
+        print(f"  Total patients: {total_patients}")
+        print(f"  Train: {len(train_dataset)} patients (indices 0-{train_size-1})")
+        print(f"  Val: {len(val_dataset)} patients (indices {train_size}-{total_patients-1})")
     
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
@@ -225,9 +235,7 @@ def train_ddp(rank, world_size, config, resume_from=None):
     )
     
     if rank == 0:
-        print(f"\nDataset Info:")
-        print(f"  Training samples: {len(train_dataset)}")
-        print(f"  Validation samples: {len(val_dataset)}")
+        print(f"\nBatch Configuration:")
         print(f"  Batch size per GPU: {config['training']['batch_size']}")
         print(f"  Effective batch size: {config['training']['batch_size'] * world_size}")
     

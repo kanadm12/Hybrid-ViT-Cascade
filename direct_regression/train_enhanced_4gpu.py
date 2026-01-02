@@ -195,20 +195,33 @@ def train_ddp(rank, world_size, config):
     # Gradient scaler for mixed precision
     scaler = torch.amp.GradScaler('cuda')
     
-    # Create datasets
-    train_dataset = PatientDRRDataset(
+    # Create datasets with proper train/val split
+    # Load all available patients first
+    full_dataset = PatientDRRDataset(
         data_path=config['data']['dataset_path'],
         target_xray_size=512,
         target_volume_size=tuple(config['model']['volume_size']),
         max_patients=config['data']['max_patients']
     )
     
-    val_dataset = PatientDRRDataset(
-        data_path=config['data']['dataset_path'],
-        target_xray_size=512,
-        target_volume_size=tuple(config['model']['volume_size']),
-        max_patients=100
-    )
+    # Split into train (80%) and val (20%)
+    total_patients = len(full_dataset)
+    train_size = int(0.8 * total_patients)
+    val_size = total_patients - train_size
+    
+    # Use torch subset for proper splitting
+    from torch.utils.data import Subset
+    train_indices = list(range(0, train_size))
+    val_indices = list(range(train_size, total_patients))
+    
+    train_dataset = Subset(full_dataset, train_indices)
+    val_dataset = Subset(full_dataset, val_indices)
+    
+    if rank == 0:
+        print(f"\nDataset split:")
+        print(f"  Total patients: {total_patients}")
+        print(f"  Train: {len(train_dataset)} patients (indices 0-{train_size-1})")
+        print(f"  Val: {len(val_dataset)} patients (indices {train_size}-{total_patients-1})")
     
     # Distributed samplers
     train_sampler = DistributedSampler(
@@ -244,8 +257,6 @@ def train_ddp(rank, world_size, config):
     )
     
     if rank == 0:
-        print(f"Train samples: {len(train_dataset)}")
-        print(f"Val samples: {len(val_dataset)}")
         print(f"\n{'='*60}")
         print(f"Starting Training")
         print(f"{'='*60}\n")
