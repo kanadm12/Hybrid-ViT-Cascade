@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
-from model_direct_256 import DirectCTRegression256
+from model_direct_256_v2 import DirectCTRegression256
 from utils.dataset import PatientDRRDataset
 
 
@@ -179,16 +179,14 @@ def train_ddp(rank, world_size, config):
         print(f"Direct 256³ CT Regression Training")
         print(f"{'='*60}")
     
-    # Model
+    # Model (same architecture as successful 64³ model)
     model = DirectCTRegression256(
-        xray_size=config['model']['xray_size'],
-        volume_size=config['model']['volume_size'],
-        vit_patch_size=config['model']['vit_patch_size'],
-        vit_dim=config['model']['vit_dim'],
-        vit_depth=config['model']['vit_depth'],
-        vit_heads=config['model']['vit_heads'],
-        mlp_ratio=config['model']['mlp_ratio'],
-        dropout=config['model']['dropout'],
+        volume_size=(256, 256, 256),
+        xray_img_size=config['model']['xray_size'],
+        voxel_dim=256,
+        vit_depth=4,
+        num_heads=4,
+        xray_feature_dim=512,
         use_checkpointing=config['model']['use_checkpointing']
     ).cuda(rank)
     
