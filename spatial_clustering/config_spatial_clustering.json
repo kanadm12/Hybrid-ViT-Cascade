@@ -27,10 +27,10 @@
     "num_patients": 500
   },
   "loss_weights": {
-    "lambda_position": 0.5,
-    "lambda_intensity": 2.0,
-    "lambda_contrast": 1.0,
-    "lambda_cluster": 0.1
+    "lambda_position": 0.05,
+    "lambda_intensity": 10.0,
+    "lambda_contrast": 2.0,
+    "lambda_cluster": 0.01
   },
   "data": {
     "data_dir": "../data",
