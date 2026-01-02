@@ -19,7 +19,13 @@ import time
 sys.path.insert(0, '..')
 
 from model_direct import DirectCTRegression
-from model_enhanced import RefinementNetwork, PerceptualLoss, EdgeAwareLoss
+from model_refinement_improved import (
+    ImprovedRefinementNetwork, 
+    SSIMLoss, 
+    PerceptualLoss, 
+    EdgeAwareLoss,
+    MultiScaleLoss
+)
 from utils.dataset import PatientDRRDataset
 
 
@@ -43,7 +49,7 @@ def train_epoch(base_model, refinement, dataloader, criterion_dict, optimizer, s
     base_model.eval()  # Frozen
     refinement.train()
     
-    epoch_losses = {'total': 0, 'l1': 0, 'perceptual': 0, 'edge': 0}
+    epoch_losses = {'total': 0, 'l1': 0, 'ssim': 0, 'perceptual': 0, 'edge': 0, 'multiscale': 0}
     num_batches = 0
     
     start_time = time.time()
@@ -69,13 +75,17 @@ def train_epoch(base_model, refinement, dataloader, criterion_dict, optimizer, s
             
             # Compute losses
             l1_loss = F.l1_loss(predicted_256, target_256)
+            ssim_loss = criterion_dict['ssim'](predicted_256, target_256)
             perceptual_loss = criterion_dict['perceptual'](predicted_256, target_256)
             edge_loss = criterion_dict['edge'](predicted_256, target_256)
+            multiscale_loss = criterion_dict['multiscale'](predicted_256, target_256)
             
             total_loss = (
                 config['loss']['l1_weight'] * l1_loss +
+                config['loss']['ssim_weight'] * ssim_loss +
                 config['loss']['perceptual_weight'] * perceptual_loss +
-                config['loss']['edge_weight'] * edge_loss
+                config['loss']['edge_weight'] * edge_loss +
+                config['loss']['multiscale_weight'] * multiscale_loss
             )
         
         # Backward
@@ -88,8 +98,10 @@ def train_epoch(base_model, refinement, dataloader, criterion_dict, optimizer, s
         # Accumulate losses
         epoch_losses['total'] += total_loss.item()
         epoch_losses['l1'] += l1_loss.item()
+        epoch_losses['ssim'] += ssim_loss.item()
         epoch_losses['perceptual'] += perceptual_loss.item()
         epoch_losses['edge'] += edge_loss.item()
+        epoch_losses['multiscale'] += multiscale_loss.item()
         num_batches += 1
         
         # Logging
@@ -100,8 +112,8 @@ def train_epoch(base_model, refinement, dataloader, criterion_dict, optimizer, s
             print(f"Epoch {epoch} [{batch_idx}/{len(dataloader)}] "
                   f"Loss: {total_loss.item():.4f} | "
                   f"L1: {l1_loss.item():.4f} | "
-                  f"Perc: {perceptual_loss.item():.4f} | "
-                  f"Edge: {edge_loss.item():.4f} | "
+                  f"SSIM: {ssim_loss.item():.4f} | "
+                  f"MS: {multiscale_loss.item():.4f} | "
                   f"{samples_per_sec:.2f} samples/s")
     
     # Average
@@ -116,9 +128,10 @@ def validate(base_model, refinement, dataloader, criterion_dict, rank):
     base_model.eval()
     refinement.eval()
     
-    val_losses = {'total': 0, 'l1': 0, 'perceptual': 0, 'edge': 0}
+    val_losses = {'total': 0, 'l1': 0, 'ssim': 0, 'perceptual': 0, 'edge': 0, 'multiscale': 0}
     num_batches = 0
     total_psnr = 0
+    total_ssim = 0
     
     with torch.no_grad():
         for batch in dataloader:
@@ -138,28 +151,43 @@ def validate(base_model, refinement, dataloader, criterion_dict, rank):
                 
                 # Losses
                 l1_loss = F.l1_loss(predicted_256, target_256)
+                ssim_loss = criterion_dict['ssim'](predicted_256, target_256)
                 perceptual_loss = criterion_dict['perceptual'](predicted_256, target_256)
                 edge_loss = criterion_dict['edge'](predicted_256, target_256)
+                multiscale_loss = criterion_dict['multiscale'](predicted_256, target_256)
                 
-                total_loss = l1_loss + 0.1 * perceptual_loss + 0.1 * edge_loss
+                total_loss = (
+                    l1_loss + 
+                    ssim_loss + 
+                    0.1 * perceptual_loss + 
+                    0.1 * edge_loss +
+                    0.5 * multiscale_loss
+                )
             
             val_losses['total'] += total_loss.item()
             val_losses['l1'] += l1_loss.item()
+            val_losses['ssim'] += ssim_loss.item()
             val_losses['perceptual'] += perceptual_loss.item()
             val_losses['edge'] += edge_loss.item()
+            val_losses['multiscale'] += multiscale_loss.item()
             
             # PSNR
             mse = F.mse_loss(predicted_256, target_256)
             psnr = 20 * torch.log10(1.0 / torch.sqrt(mse))
             total_psnr += psnr.item()
             
+            # SSIM metric (1 - loss)
+            ssim_metric = 1.0 - ssim_loss.item()
+            total_ssim += ssim_metric
+            
             num_batches += 1
     
     for key in val_losses:
         val_losses[key] /= num_batches
     avg_psnr = total_psnr / num_batches
+    avg_ssim = total_ssim / num_batches
     
-    return val_losses, avg_psnr
+    return val_losses, avg_psnr, avg_ssim
 
 
 def train_refinement_ddp(rank, world_size, config):
@@ -197,8 +225,8 @@ def train_refinement_ddp(rank, world_size, config):
     if rank == 0:
         print(f"✓ Loaded frozen base model from: {config['base_model_checkpoint']}")
     
-    # Create refinement network
-    refinement = RefinementNetwork().cuda(rank)
+    # Create improved refinement network
+    refinement = ImprovedRefinementNetwork(base_channels=32).cuda(rank)
     refinement = DDP(refinement, device_ids=[rank])
     
     if rank == 0:
@@ -207,8 +235,10 @@ def train_refinement_ddp(rank, world_size, config):
     
     # Loss functions
     criterion_dict = {
+        'ssim': SSIMLoss().cuda(rank),
         'perceptual': PerceptualLoss().cuda(rank),
-        'edge': EdgeAwareLoss().cuda(rank)
+        'edge': EdgeAwareLoss().cuda(rank),
+        'multiscale': MultiScaleLoss().cuda(rank)
     }
     
     # Optimizer
@@ -294,18 +324,21 @@ def train_refinement_ddp(rank, world_size, config):
             print(f"\nEpoch {epoch} Training:")
             print(f"  Total Loss: {train_losses['total']:.4f}")
             print(f"  L1: {train_losses['l1']:.4f}")
+            print(f"  SSIM: {train_losses['ssim']:.4f}")
             print(f"  Perceptual: {train_losses['perceptual']:.4f}")
             print(f"  Edge: {train_losses['edge']:.4f}")
+            print(f"  MultiScale: {train_losses['multiscale']:.4f}")
         
         # Validate
         if epoch % config['logging']['val_interval'] == 0:
-            val_losses, val_psnr = validate(
+            val_losses, val_psnr, val_ssim = validate(
                 base_model, refinement, val_loader, criterion_dict, rank
             )
             
             if rank == 0:
                 print(f"\nValidation:")
                 print(f"  PSNR (256³): {val_psnr:.2f} dB")
+                print(f"  SSIM (256³): {val_ssim:.4f}")
                 
                 if val_psnr > best_psnr:
                     best_psnr = val_psnr
@@ -315,9 +348,10 @@ def train_refinement_ddp(rank, world_size, config):
                         'refinement_state_dict': refinement.module.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
                         'psnr': val_psnr,
+                        'ssim': val_ssim,
                         'config': config
                     }, 'checkpoints_refinement/best_refinement.pt')
-                    print(f"  ✓ New best refinement! PSNR: {best_psnr:.2f} dB")
+                    print(f"  ✓ New best refinement! PSNR: {val_psnr:.2f} dB, SSIM: {val_ssim:.4f}")
         
         scheduler.step()
     
