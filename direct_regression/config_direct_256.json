@@ -1,0 +1,38 @@
+{
+  "model": {
+    "xray_size": 512,
+    "volume_size": 256,
+    "vit_patch_size": 16,
+    "vit_dim": 512,
+    "vit_depth": 6,
+    "vit_heads": 8,
+    "mlp_ratio": 4.0,
+    "dropout": 0.1,
+    "use_checkpointing": true
+  },
+  "training": {
+    "num_epochs": 100,
+    "batch_size": 1,
+    "gradient_accumulation_steps": 4,
+    "learning_rate": 1e-4,
+    "weight_decay": 0.01,
+    "grad_clip_max_norm": 1.0,
+    "warmup_epochs": 5
+  },
+  "loss": {
+    "l1_weight": 1.0,
+    "ssim_weight": 0.1
+  },
+  "data": {
+    "dataset_path": "/workspace/drr_patient_data",
+    "max_patients": 100,
+    "num_workers": 2
+  },
+  "logging": {
+    "log_interval": 10,
+    "val_interval": 1,
+    "save_checkpoint_interval": 10
+  },
+  "checkpoint_dir": "checkpoints_direct_256",
+  "world_size": 4
+}
