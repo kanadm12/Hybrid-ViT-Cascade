@@ -4,16 +4,21 @@
   },
   "base_model_checkpoint": "checkpoints_direct/best_model.pt",
   "training": {
-    "num_epochs": 50,
+    "num_epochs": 100,
     "batch_size": 2,
     "learning_rate": 5e-5,
     "weight_decay": 0.01,
     "grad_clip_max_norm": 1.0
   },
+  "loss": {
+    "l1_weight": 1.0,
+    "perceptual_weight": 0.1,
+    "edge_weight": 0.1
+  },
   "data": {
     "dataset_path": "/workspace/drr_patient_data",
     "max_patients": 100,
-    "num_workers": 4
+    "num_workers": 2
   },
   "logging": {
     "log_interval": 10,
