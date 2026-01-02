@@ -132,7 +132,7 @@ def validate(model, dataloader, criterion, rank):
     return val_losses, avg_psnr
 
 
-def train_ddp(rank, world_size, config):
+def train_ddp(rank, world_size, config, resume_from=None):
     """Main training function for each GPU"""
     setup_ddp(rank, world_size)
     
@@ -169,6 +169,24 @@ def train_ddp(rank, world_size, config):
     )
     
     scaler = torch.amp.GradScaler('cuda')
+    
+    # Resume from checkpoint if specified
+    start_epoch = 1
+    best_psnr = 0
+    
+    if resume_from is not None:
+        if rank == 0:
+            print(f"\nResuming from checkpoint: {resume_from}")
+        checkpoint = torch.load(resume_from, map_location=f'cuda:{rank}')
+        model.module.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_psnr = checkpoint.get('best_psnr', checkpoint.get('val_psnr', 0))
+        if rank == 0:
+            print(f"Resuming from epoch {checkpoint['epoch']}")
+            print(f"Best PSNR so far: {best_psnr:.2f} dB")
     
     # Datasets
     train_dataset = PatientDRRDataset(
@@ -214,9 +232,7 @@ def train_ddp(rank, world_size, config):
         print(f"  Effective batch size: {config['training']['batch_size'] * world_size}")
     
     # Training loop
-    best_psnr = 0
-    
-    for epoch in range(1, config['training']['num_epochs'] + 1):
+    for epoch in range(start_epoch, config['training']['num_epochs'] + 1):
         if rank == 0:
             print(f"\n{'='*80}")
             print(f"Epoch {epoch}/{config['training']['num_epochs']}")
@@ -246,7 +262,7 @@ def train_ddp(rank, world_size, config):
             print(f"  SSIM Loss: {val_losses['ssim']:.4f}")
             print(f"  PSNR: {val_psnr:.2f} dB")
             
-            # Save checkpoint
+            # Save best model
             if val_psnr > best_psnr:
                 best_psnr = val_psnr
                 Path(config['checkpoints']['save_dir']).mkdir(exist_ok=True)
@@ -261,7 +277,7 @@ def train_ddp(rank, world_size, config):
                 }, f"{config['checkpoints']['save_dir']}/best_model.pt")
                 print(f"  ✓ New best model saved! PSNR: {best_psnr:.2f} dB")
             
-            # Save periodic checkpoint
+            # Save periodic checkpoint (only at specified intervals)
             if epoch % config['checkpoints']['save_every'] == 0:
                 torch.save({
                     'epoch': epoch,
@@ -271,7 +287,7 @@ def train_ddp(rank, world_size, config):
                     'val_psnr': val_psnr,
                     'config': config
                 }, f"{config['checkpoints']['save_dir']}/checkpoint_epoch_{epoch}.pt")
-                print(f"  ✓ Checkpoint saved at epoch {epoch}")
+                print(f"  ✓ Periodic checkpoint saved at epoch {epoch}")
         
         scheduler.step()
     
@@ -285,9 +301,13 @@ def train_ddp(rank, world_size, config):
 
 
 def main():
-    config_path = 'config_direct.json'
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='config_direct.json')
+    parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume from')
+    args = parser.parse_args()
     
-    with open(config_path, 'r') as f:
+    with open(args.config, 'r') as f:
         config = json.load(f)
     
     world_size = torch.cuda.device_count()
@@ -295,11 +315,13 @@ def main():
     print(f"\n{'='*80}")
     print(f"Direct CT Regression Training")
     print(f"Using {world_size} GPUs")
+    if args.resume:
+        print(f"Resuming from: {args.resume}")
     print(f"{'='*80}")
     
     mp.spawn(
         train_ddp,
-        args=(world_size, config),
+        args=(world_size, config, args.resume),
         nprocs=world_size,
         join=True
     )

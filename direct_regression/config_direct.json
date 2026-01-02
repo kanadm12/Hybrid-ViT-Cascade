@@ -32,6 +32,6 @@
   
   "checkpoints": {
     "save_dir": "checkpoints_direct",
-    "save_every": 1
+    "save_every": 10
   }
 }
