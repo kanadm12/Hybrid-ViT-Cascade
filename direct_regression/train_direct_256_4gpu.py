@@ -169,7 +169,7 @@ def validate(model, dataloader, rank):
     return avg_loss, avg_l1, avg_psnr
 
 
-def train_ddp(rank, world_size, config):
+def train_ddp(rank, world_size, config, resume_checkpoint=None):
     """Main training function"""
     
     setup_ddp(rank, world_size)
@@ -212,6 +212,22 @@ def train_ddp(rank, world_size, config):
     
     scaler = torch.amp.GradScaler('cuda')
     
+    # Resume from checkpoint if provided
+    start_epoch = 1
+    best_psnr = 0
+    
+    if resume_checkpoint is not None:
+        if rank == 0:
+            print(f"\n✓ Resuming from checkpoint: {resume_checkpoint}")
+        checkpoint = torch.load(resume_checkpoint, map_location=f'cuda:{rank}', weights_only=False)
+        model.module.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_psnr = checkpoint.get('psnr', 0)
+        if rank == 0:
+            print(f"✓ Resuming from epoch {checkpoint['epoch']}, Best PSNR: {best_psnr:.2f} dB")
+            print(f"✓ New learning rate: {optimizer.param_groups[0]['lr']:.2e}")
+    
     # Datasets with 80/20 split
     full_dataset = PatientDRRDataset(
         data_path=config['data']['dataset_path'],
@@ -240,14 +256,14 @@ def train_ddp(rank, world_size, config):
     train_loader = DataLoader(
         train_dataset,
         batch_size=config['training']['batch_size'],
-        sampler=train_sampler,
-        num_workers=config['data']['num_workers'],
-        pin_memory=True,
-        persistent_workers=True if config['data']['num_workers'] > 0 else False
-    )
+        sampler=best_psnr  # Use loaded value if resuming
     
-    val_loader = DataLoader(
-        val_dataset,
+    if rank == 0:
+        print(f"\n{'='*60}")
+        print(f"Starting Training from Epoch {start_epoch}")
+        print(f"{'='*60}\n")
+    
+    for epoch in range(start_epoch
         batch_size=config['training']['batch_size'],
         sampler=val_sampler,
         num_workers=config['data']['num_workers'],
@@ -325,6 +341,12 @@ def train_ddp(rank, world_size, config):
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume from')
+    args = parser.parse_args()
+    
     # Load config
     config_path = Path(__file__).parent / "config_direct_256.json"
     with open(config_path, 'r') as f:
@@ -334,7 +356,7 @@ if __name__ == "__main__":
     
     mp.spawn(
         train_ddp,
-        args=(world_size, config),
+        args=(world_size, config, args.resume),
         nprocs=world_size,
         join=True
     )
