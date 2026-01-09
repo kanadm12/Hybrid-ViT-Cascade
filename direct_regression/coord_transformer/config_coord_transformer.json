@@ -1,0 +1,51 @@
+{
+  "model_name": "coordinate_transformer_ct",
+  "description": "Coordinate-based Transformer for CT reconstruction - processes volume as set of 3D coordinates with cross-attention to X-rays",
+  
+  "model": {
+    "volume_size": [64, 64, 64],
+    "xray_img_size": 512,
+    "xray_patch_size": 32,
+    "xray_embed_dim": 512,
+    "xray_depth": 6,
+    "coord_embed_dim": 512,
+    "num_transformer_blocks": 6,
+    "num_heads": 8,
+    "dropout": 0.1
+  },
+  
+  "training": {
+    "batch_size": 2,
+    "learning_rate": 3e-5,
+    "num_epochs": 100,
+    "gradient_clip": 1.0,
+    "weight_decay": 0.05,
+    "warmup_epochs": 10,
+    
+    "loss_weights": {
+      "l1_weight": 1.0,
+      "gradient_weight": 0.3,
+      "smoothness_weight": 0.05
+    }
+  },
+  
+  "data": {
+    "dataset_path": "/workspace/drr_patient_data",
+    "max_patients": 100,
+    "train_split": 0.8,
+    "val_split": 0.1,
+    "test_split": 0.1,
+    "num_workers": 4
+  },
+  
+  "checkpoints": {
+    "save_dir": "checkpoints_coord_transformer",
+    "save_every": 5,
+    "keep_best": true
+  },
+  
+  "logging": {
+    "log_every": 10,
+    "visualize_every": 50
+  }
+}
