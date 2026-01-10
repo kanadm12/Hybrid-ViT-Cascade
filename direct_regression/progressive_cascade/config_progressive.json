@@ -1,0 +1,127 @@
+{
+  "model_name": "progressive_cascade_multiscale",
+  "description": "Progressive 64³→128³→256³ cascade with X-ray geometric consistency loss and frequency-aware training",
+  
+  "model": {
+    "xray_img_size": 512,
+    "xray_feature_dim": 512,
+    "voxel_dim": 256,
+    "use_gradient_checkpointing": true
+  },
+  
+  "training": {
+    "weight_decay": 0.01,
+    "gradient_clip": 1.0,
+    
+    "stage1": {
+      "description": "Base 64³ reconstruction - focus on coarse structure",
+      "num_epochs": 50,
+      "batch_size": 8,
+      "learning_rate": 1e-4,
+      "target_resolution": [64, 64, 64]
+    },
+    
+    "stage2": {
+      "description": "Refine to 128³ - add texture and medium-frequency details",
+      "num_epochs": 30,
+      "batch_size": 4,
+      "learning_rate": 5e-5,
+      "target_resolution": [128, 128, 128]
+    },
+    
+    "stage3": {
+      "description": "Refine to 256³ - capture fine details and edges",
+      "num_epochs": 20,
+      "batch_size": 2,
+      "learning_rate": 2e-5,
+      "target_resolution": [256, 256, 256]
+    }
+  },
+  
+  "loss": {
+    "stage1": {
+      "l1": 1.0,
+      "ssim": 0.5
+    },
+    
+    "stage2": {
+      "l1": 1.0,
+      "ssim": 0.5,
+      "vgg": 0.1
+    },
+    
+    "stage3": {
+      "l1": 1.0,
+      "ssim": 0.5,
+      "vgg": 0.1,
+      "gradient": 0.2,
+      "drr": 0.3
+    }
+  },
+  
+  "data": {
+    "dataset_path": "/workspace/drr_patient_data",
+    "max_patients": 100,
+    "train_split": 0.8,
+    "val_split": 0.1,
+    "test_split": 0.1,
+    "num_workers": 4
+  },
+  
+  "checkpoints": {
+    "save_dir": "checkpoints_progressive",
+    "save_every": 5
+  },
+  
+  "notes": {
+    "memory_requirements": {
+      "stage1_64": "~10GB per GPU with batch_size=8",
+      "stage2_128": "~16GB per GPU with batch_size=4",
+      "stage3_256": "~35GB per GPU with batch_size=2 (with gradient checkpointing)"
+    },
+    
+    "training_strategy": {
+      "stage1": "Train from scratch for 50 epochs to establish coarse structure",
+      "stage2": "Load stage1 checkpoint, freeze stage1 weights, train stage2 for 30 epochs",
+      "stage3": "Load stage1+2 checkpoint, freeze both, train stage3 for 20 epochs with gradient checkpointing"
+    },
+    
+    "loss_progression": {
+      "stage1": "L1 + SSIM focuses on overall structure and intensity distribution",
+      "stage2": "Adds VGG perceptual loss on tri-planar slices for texture",
+      "stage3": "Adds gradient magnitude loss for edges and DRR reprojection for geometric consistency"
+    },
+    
+    "expected_performance": {
+      "stage1_64": "PSNR ~28-30 dB, SSIM ~0.85-0.90 (coarse reconstruction)",
+      "stage2_128": "PSNR ~32-35 dB, SSIM ~0.92-0.95 (improved texture)",
+      "stage3_256": "PSNR ~35-38 dB, SSIM ~0.95-0.97 (high-quality with fine details)"
+    },
+    
+    "alternative_configurations": {
+      "memory_constrained": {
+        "description": "For GPUs with <32GB memory",
+        "stage3_batch_size": 1,
+        "stage3_voxel_dim": 192,
+        "use_mixed_precision": true
+      },
+      
+      "fast_prototyping": {
+        "description": "Faster training for initial experiments",
+        "stage1_epochs": 20,
+        "stage2_epochs": 15,
+        "stage3_epochs": 10,
+        "max_patients": 50
+      },
+      
+      "high_quality": {
+        "description": "Maximum quality (longer training)",
+        "stage1_epochs": 100,
+        "stage2_epochs": 50,
+        "stage3_epochs": 30,
+        "stage3_voxel_dim": 320,
+        "gradient_checkpointing": true
+      }
+    }
+  }
+}
