@@ -18,10 +18,12 @@ import time
 from datetime import datetime
 import numpy as np
 
-sys.path.insert(0, '../..')
+# Add parent directories to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from progressive_cascade.model_progressive import ProgressiveCascadeModel
-from progressive_cascade.loss_multiscale import MultiScaleLoss, compute_psnr, compute_ssim_metric
+from model_progressive import ProgressiveCascadeModel
+from loss_multiscale import MultiScaleLoss, compute_psnr, compute_ssim_metric
 from utils.dataset import PatientDRRDataset
 
 
