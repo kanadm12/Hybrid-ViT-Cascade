@@ -414,10 +414,27 @@ def compute_psnr(pred, target):
 
 def compute_ssim_metric(pred, target):
     """Compute SSIM as a metric (not loss)"""
-    ssim_loss_fn = SSIMLoss()
-    ssim_loss = ssim_loss_fn(pred, target)
-    ssim = 1 - ssim_loss.item()
-    return ssim
+    # Compute SSIM directly without creating new loss instance
+    C1 = 0.01 ** 2
+    C2 = 0.03 ** 2
+    
+    window_size = min(11, pred.shape[2], pred.shape[3], pred.shape[4])
+    
+    mu_pred = F.avg_pool3d(pred, window_size, stride=1, padding=window_size//2)
+    mu_target = F.avg_pool3d(target, window_size, stride=1, padding=window_size//2)
+    
+    mu_pred_sq = mu_pred ** 2
+    mu_target_sq = mu_target ** 2
+    mu_pred_target = mu_pred * mu_target
+    
+    sigma_pred_sq = F.avg_pool3d(pred ** 2, window_size, stride=1, padding=window_size//2) - mu_pred_sq
+    sigma_target_sq = F.avg_pool3d(target ** 2, window_size, stride=1, padding=window_size//2) - mu_target_sq
+    sigma_pred_target = F.avg_pool3d(pred * target, window_size, stride=1, padding=window_size//2) - mu_pred_target
+    
+    ssim_map = ((2 * mu_pred_target + C1) * (2 * sigma_pred_target + C2)) / \
+               ((mu_pred_sq + mu_target_sq + C1) * (sigma_pred_sq + sigma_target_sq + C2))
+    
+    return ssim_map.mean().item()
 
 
 if __name__ == "__main__":
