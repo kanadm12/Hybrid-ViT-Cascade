@@ -208,6 +208,10 @@ class Stage2Refiner128(nn.Module):
             prev_stage_embed=None
         )
         
+        # Ensure refinement is 1 channel (should already be from HybridViT3D)
+        if refinement.shape[1] != 1:
+            raise ValueError(f"Expected refinement to have 1 channel, got {refinement.shape[1]} channels. Shape: {refinement.shape}")
+        
         # Residual connection with upsampled base
         volume_64_upsampled = F.interpolate(volume_64, size=self.volume_size, 
                                             mode='trilinear', align_corners=False)
