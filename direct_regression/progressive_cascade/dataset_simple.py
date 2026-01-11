@@ -89,8 +89,9 @@ class PatientDRRDataset(Dataset):
         lat_drr = np.array(lat_drr, dtype=np.float32) / 255.0
         
         # Vertically flip DRRs (important for proper orientation)
-        pa_drr = np.flipud(pa_drr)
-        lat_drr = np.flipud(lat_drr)
+        # Use .copy() to avoid negative strides issue with PyTorch
+        pa_drr = np.flipud(pa_drr).copy()
+        lat_drr = np.flipud(lat_drr).copy()
         
         # Convert to torch tensors: (H, W) -> (1, H, W)
         pa_drr = torch.from_numpy(pa_drr).unsqueeze(0)
