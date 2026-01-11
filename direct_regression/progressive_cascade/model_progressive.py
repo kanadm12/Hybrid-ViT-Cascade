@@ -208,10 +208,6 @@ class Stage2Refiner128(nn.Module):
             prev_stage_embed=None
         )
         
-        # Ensure refinement is 1 channel (should already be from HybridViT3D)
-        if refinement.shape[1] != 1:
-            raise ValueError(f"Expected refinement to have 1 channel, got {refinement.shape[1]} channels. Shape: {refinement.shape}")
-        
         # Residual connection with upsampled base
         volume_64_upsampled = F.interpolate(volume_64, size=self.volume_size, 
                                             mode='trilinear', align_corners=False)
@@ -393,10 +389,6 @@ class ProgressiveCascadeModel(nn.Module):
         xray_features_2d_stage2, time_xray_cond, _ = self.xray_encoder(xrays, stage=2)
         volume_128 = self.stage2(volume_64, xray_features_2d_stage2, time_xray_cond)
         outputs['stage2'] = volume_128
-        
-        # Debug: check output shape
-        if volume_128.shape[1] != 1:
-            raise ValueError(f"Stage 2 output has wrong channels: {volume_128.shape}, expected (B, 1, 128, 128, 128)")
         
         if max_stage == 2:
             return outputs if return_intermediate else volume_128

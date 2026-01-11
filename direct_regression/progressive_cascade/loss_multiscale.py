@@ -80,8 +80,9 @@ class TriPlanarVGGLoss(nn.Module):
         """Extract VGG features from 2D image"""
         features = []
         for layer in self.features:
-            x = layer(x)
-            features.append(x)
+            # Each layer processes the ORIGINAL input, not the previous output
+            feat = layer(x)
+            features.append(feat)
         return features
     
     def forward(self, pred_volume, target_volume):
@@ -93,10 +94,6 @@ class TriPlanarVGGLoss(nn.Module):
             perceptual_loss: scalar
         """
         B, C, D, H, W = pred_volume.shape
-        
-        # Debug: check input shape
-        if C != 1:
-            raise ValueError(f"VGG loss expected 1 channel, got {C} channels. pred_volume shape: {pred_volume.shape}")
         
         # Sample slices from middle of volume
         mid_d, mid_h, mid_w = D // 2, H // 2, W // 2
@@ -116,22 +113,13 @@ class TriPlanarVGGLoss(nn.Module):
         total_loss = 0.0
         
         for pred_slice, target_slice in zip(pred_slices, target_slices):
-            # Debug: check slice shape before processing
-            print(f"DEBUG: pred_slice shape BEFORE processing: {pred_slice.shape}")
-            if pred_slice.shape[1] != 1:
-                raise ValueError(f"pred_slice has wrong channels before expand: shape={pred_slice.shape}, expected (B, 1, H, W)")
-            
             # Normalize to [0, 1] and replicate to 3 channels (VGG expects RGB)
             pred_slice = (pred_slice + 1) / 2  # Assuming input is [-1, 1]
             target_slice = (target_slice + 1) / 2
             
-            print(f"DEBUG: pred_slice shape AFTER normalization: {pred_slice.shape}")
-            
-            # Repeat grayscale to 3-channel RGB (not expand - that requires dim=1)
+            # Repeat grayscale to 3-channel RGB
             pred_slice = pred_slice.repeat(1, 3, 1, 1)
             target_slice = target_slice.repeat(1, 3, 1, 1)
-            
-            print(f"DEBUG: pred_slice shape AFTER repeat: {pred_slice.shape}")
             
             # Extract features
             pred_feats = self.extract_features(pred_slice)
