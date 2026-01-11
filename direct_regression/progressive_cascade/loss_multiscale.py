@@ -117,6 +117,7 @@ class TriPlanarVGGLoss(nn.Module):
         
         for pred_slice, target_slice in zip(pred_slices, target_slices):
             # Debug: check slice shape before processing
+            print(f"DEBUG: pred_slice shape BEFORE processing: {pred_slice.shape}")
             if pred_slice.shape[1] != 1:
                 raise ValueError(f"pred_slice has wrong channels before expand: shape={pred_slice.shape}, expected (B, 1, H, W)")
             
@@ -124,9 +125,13 @@ class TriPlanarVGGLoss(nn.Module):
             pred_slice = (pred_slice + 1) / 2  # Assuming input is [-1, 1]
             target_slice = (target_slice + 1) / 2
             
+            print(f"DEBUG: pred_slice shape AFTER normalization: {pred_slice.shape}")
+            
             # Repeat grayscale to 3-channel RGB (not expand - that requires dim=1)
             pred_slice = pred_slice.repeat(1, 3, 1, 1)
             target_slice = target_slice.repeat(1, 3, 1, 1)
+            
+            print(f"DEBUG: pred_slice shape AFTER repeat: {pred_slice.shape}")
             
             # Extract features
             pred_feats = self.extract_features(pred_slice)
