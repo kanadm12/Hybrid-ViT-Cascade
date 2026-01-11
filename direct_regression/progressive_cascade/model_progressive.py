@@ -394,6 +394,10 @@ class ProgressiveCascadeModel(nn.Module):
         volume_128 = self.stage2(volume_64, xray_features_2d_stage2, time_xray_cond)
         outputs['stage2'] = volume_128
         
+        # Debug: check output shape
+        if volume_128.shape[1] != 1:
+            raise ValueError(f"Stage 2 output has wrong channels: {volume_128.shape}, expected (B, 1, 128, 128, 128)")
+        
         if max_stage == 2:
             return outputs if return_intermediate else volume_128
         

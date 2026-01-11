@@ -94,6 +94,10 @@ class TriPlanarVGGLoss(nn.Module):
         """
         B, C, D, H, W = pred_volume.shape
         
+        # Debug: check input shape
+        if C != 1:
+            raise ValueError(f"VGG loss expected 1 channel, got {C} channels. pred_volume shape: {pred_volume.shape}")
+        
         # Sample slices from middle of volume
         mid_d, mid_h, mid_w = D // 2, H // 2, W // 2
         
