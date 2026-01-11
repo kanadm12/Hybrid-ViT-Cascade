@@ -185,21 +185,18 @@ def main():
         print(f"Loading Stage 1 checkpoint: {stage1_path}")
         checkpoint = torch.load(stage1_path, map_location=device, weights_only=False)
         
-        # Filter to only Stage 1 weights (exclude Stage 2 pos_embed which may mismatch)
-        stage1_weights = {k: v for k, v in checkpoint['model_state_dict'].items() 
-                         if ('stage1' in k or 'xray_encoder' in k)}
+        # CRITICAL: Only load Stage 1 + encoder weights
+        # Stage 2 will be trained from scratch with new architecture
+        stage1_weights = {}
+        for k, v in checkpoint['model_state_dict'].items():
+            if 'stage1' in k or 'xray_encoder' in k:
+                # Skip any Stage 2 or Stage 3 components
+                if 'stage2' not in k and 'stage3' not in k:
+                    stage1_weights[k] = v
         
-        # Load with strict=False to allow missing Stage 2 keys
-        missing_keys, unexpected_keys = model.load_state_dict(stage1_weights, strict=False)
-        
-        # Filter out expected missing keys (Stage 2 and Stage 3)
-        expected_missing = [k for k in missing_keys if 'stage2' in k or 'stage3' in k]
-        unexpected_missing = [k for k in missing_keys if k not in expected_missing]
-        
-        if unexpected_missing:
-            print(f"WARNING: Unexpected missing keys: {unexpected_missing}")
-        
-        print(f"✓ Loaded Stage 1 weights\n")
+        # Load only Stage 1 weights
+        model.load_state_dict(stage1_weights, strict=False)
+        print(f"✓ Loaded Stage 1 weights ({len(stage1_weights)} parameters)\n")
     else:
         print(f"ERROR: Stage 1 checkpoint not found: {stage1_path}")
         return
