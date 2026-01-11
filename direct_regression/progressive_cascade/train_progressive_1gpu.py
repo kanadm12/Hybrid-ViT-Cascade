@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from model_progressive import ProgressiveCascadeModel
 from loss_multiscale import MultiScaleLoss, compute_psnr, compute_ssim_metric
-from utils.dataset import PatientDRRDataset
+from dataset_simple import PatientDRRDataset
 
 
 def resize_ct_volume(ct_volume, target_size):
@@ -246,7 +246,7 @@ def train_stage(config, stage, checkpoint_dir):
     # Dataset
     dataset_path = config['data']['dataset_path']
     train_dataset = PatientDRRDataset(
-        root_dir=dataset_path,
+        dataset_path=dataset_path,
         max_patients=config['data']['max_patients'],
         split='train',
         train_split=config['data']['train_split'],
@@ -254,7 +254,7 @@ def train_stage(config, stage, checkpoint_dir):
     )
     
     val_dataset = PatientDRRDataset(
-        root_dir=dataset_path,
+        dataset_path=dataset_path,
         max_patients=config['data']['max_patients'],
         split='val',
         train_split=config['data']['train_split'],
