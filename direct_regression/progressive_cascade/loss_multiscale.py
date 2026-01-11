@@ -116,6 +116,10 @@ class TriPlanarVGGLoss(nn.Module):
         total_loss = 0.0
         
         for pred_slice, target_slice in zip(pred_slices, target_slices):
+            # Debug: check slice shape before processing
+            if pred_slice.shape[1] != 1:
+                raise ValueError(f"pred_slice has wrong channels before expand: shape={pred_slice.shape}, expected (B, 1, H, W)")
+            
             # Normalize to [0, 1] and replicate to 3 channels (VGG expects RGB)
             pred_slice = (pred_slice + 1) / 2  # Assuming input is [-1, 1]
             target_slice = (target_slice + 1) / 2
