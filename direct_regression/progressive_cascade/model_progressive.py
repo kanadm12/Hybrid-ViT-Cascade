@@ -185,9 +185,6 @@ class Stage2Refiner128(nn.Module):
             use_prev_stage=False
         )
         
-        # Project back to 1 channel (HybridViT3D outputs in_channels, not 1)
-        self.to_volume = nn.Conv3d(32, 1, 1)
-        
         # Residual connection
         self.residual_weight = nn.Parameter(torch.ones(1) * 0.5)
         
@@ -210,9 +207,6 @@ class Stage2Refiner128(nn.Module):
             cond=time_xray_cond,
             prev_stage_embed=None
         )
-        
-        # Project to 1 channel
-        refinement = self.to_volume(refinement)
         
         # Residual connection with upsampled base
         volume_64_upsampled = F.interpolate(volume_64, size=self.volume_size, 
@@ -259,9 +253,6 @@ class Stage3Refiner256(nn.Module):
             cond_dim=1024,
             use_prev_stage=False
         )
-        
-        # Project back to 1 channel
-        self.to_volume = nn.Conv3d(32, 1, 1)
         
         # High-frequency enhancement
         self.detail_enhancer = nn.Sequential(
@@ -316,13 +307,12 @@ class Stage3Refiner256(nn.Module):
     
     def _vit_forward(self, x, xray_features_2d, time_xray_cond):
         """Helper for gradient checkpointing"""
-        refinement = self.vit_refiner(
+        return self.vit_refiner(
             x=x,
             context=xray_features_2d.flatten(2).transpose(1, 2),
             cond=time_xray_cond,
             prev_stage_embed=None
         )
-        return self.to_volume(refinement)
 
 
 class ProgressiveCascadeModel(nn.Module):
