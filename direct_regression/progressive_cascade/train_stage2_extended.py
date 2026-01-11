@@ -145,12 +145,12 @@ def main():
     # Dataset
     print("Loading dataset...")
     train_dataset = PatientDRRDataset(
-        data_root=config['data']['dataset_path'],
+        dataset_path=config['data']['dataset_path'],
         split='train',
         max_patients=config['data']['max_patients']
     )
     val_dataset = PatientDRRDataset(
-        data_root=config['data']['dataset_path'],
+        dataset_path=config['data']['dataset_path'],
         split='val',
         max_patients=10
     )
