@@ -198,7 +198,7 @@ def train_stage(config, stage, checkpoint_dir):
         xray_img_size=config['model']['xray_img_size'],
         xray_feature_dim=config['model']['xray_feature_dim'],
         voxel_dim=config['model']['voxel_dim'],
-        use_gradient_checkpointing=(stage == 3)  # Only for stage 3
+        use_gradient_checkpointing=(stage >= 2)  # Enable for stages 2 and 3
     ).cuda()
     
     # Load previous stage weights if not stage 1

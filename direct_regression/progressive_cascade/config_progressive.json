@@ -24,7 +24,7 @@
     "stage2": {
       "description": "Refine to 128³ - add texture and medium-frequency details",
       "num_epochs": 30,
-      "batch_size": 4,
+      "batch_size": 2,
       "learning_rate": 5e-5,
       "target_resolution": [128, 128, 128]
     },
