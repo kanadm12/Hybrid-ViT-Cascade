@@ -433,7 +433,10 @@ def main():
     # Train each stage sequentially
     total_start = time.time()
     
-    for stage in range(1, 4):
+    # Start stage (1, 2, or 3) - change this to skip completed stages
+    start_stage = 1  # Change to 2 to skip Stage 1, or 3 to skip Stages 1-2
+    
+    for stage in range(start_stage, 4):
         print(f"\n{'#'*60}")
         print(f"# STAGE {stage} TRAINING")
         print(f"{'#'*60}\n")
