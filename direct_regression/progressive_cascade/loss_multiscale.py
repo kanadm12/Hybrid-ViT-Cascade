@@ -260,17 +260,19 @@ class Stage1Loss(nn.Module):
 
 class Stage2Loss(nn.Module):
     """
-    Stage 2 Loss: L1 + SSIM + VGG Perceptual
-    Focus: Add texture and medium-frequency details
+    Stage 2 Loss: L1 + SSIM + VGG Perceptual + Gradient
+    Focus: Add texture, edges, and anatomical detail
     """
-    def __init__(self, l1_weight=1.0, ssim_weight=0.5, vgg_weight=0.1):
+    def __init__(self, l1_weight=1.0, ssim_weight=0.5, vgg_weight=0.1, gradient_weight=0.15):
         super().__init__()
         self.l1_weight = l1_weight
         self.ssim_weight = ssim_weight
         self.vgg_weight = vgg_weight
+        self.gradient_weight = gradient_weight
         
         self.ssim_loss = SSIMLoss()
         self.vgg_loss = TriPlanarVGGLoss()
+        self.gradient_loss = GradientMagnitudeLoss()
     
     def forward(self, pred, target):
         """
@@ -282,16 +284,19 @@ class Stage2Loss(nn.Module):
         l1_loss = F.l1_loss(pred, target)
         ssim_loss = self.ssim_loss(pred, target)
         vgg_loss = self.vgg_loss(pred, target)
+        gradient_loss = self.gradient_loss(pred, target)
         
         total_loss = (self.l1_weight * l1_loss + 
                      self.ssim_weight * ssim_loss + 
-                     self.vgg_weight * vgg_loss)
+                     self.vgg_weight * vgg_loss +
+                     self.gradient_weight * gradient_loss)
         
         return {
             'total_loss': total_loss,
             'l1_loss': l1_loss,
             'ssim_loss': ssim_loss,
-            'vgg_loss': vgg_loss
+            'vgg_loss': vgg_loss,
+            'gradient_loss': gradient_loss
         }
 
 
