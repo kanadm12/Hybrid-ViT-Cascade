@@ -119,8 +119,10 @@ class TriPlanarVGGLoss(nn.Module):
             # Normalize to [0, 1] and replicate to 3 channels (VGG expects RGB)
             pred_slice = (pred_slice + 1) / 2  # Assuming input is [-1, 1]
             target_slice = (target_slice + 1) / 2
-            pred_slice = pred_slice.expand(-1, 3, -1, -1)
-            target_slice = target_slice.expand(-1, 3, -1, -1)
+            
+            # Repeat grayscale to 3-channel RGB (not expand - that requires dim=1)
+            pred_slice = pred_slice.repeat(1, 3, 1, 1)
+            target_slice = target_slice.repeat(1, 3, 1, 1)
             
             # Extract features
             pred_feats = self.extract_features(pred_slice)
