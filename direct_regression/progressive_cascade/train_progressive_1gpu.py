@@ -402,15 +402,15 @@ def main():
     with open(config_path, 'r') as f:
         config = json.load(f)
     
-    # Override with 100 patients and 100 epochs
+    # Override with 100 patients and 20 epochs per stage
     config['data']['max_patients'] = 100
-    config['training']['stage1']['num_epochs'] = 100
-    config['training']['stage2']['num_epochs'] = 100
-    config['training']['stage3']['num_epochs'] = 100
+    config['training']['stage1']['num_epochs'] = 20
+    config['training']['stage2']['num_epochs'] = 20
+    config['training']['stage3']['num_epochs'] = 20
     
     print("="*60)
     print("Progressive Multi-Scale CT Reconstruction Training")
-    print("Single GPU - 100 Patients - 100 Epochs per Stage")
+    print("Single GPU - 100 Patients - 20 Epochs per Stage")
     print("="*60)
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Config: {config_path}")
