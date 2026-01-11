@@ -44,8 +44,8 @@ def train_epoch(model, dataloader, criterion, optimizer, scaler, epoch, device):
     num_batches = 0
     
     for batch_idx, batch in enumerate(dataloader):
-        ct_volume = batch['ct'].to(device)  # (B, 1, 256, 256, 256)
-        xray_images = batch['xrays'].to(device)  # (B, 2, 1, 512, 512)
+        ct_volume = batch['ct_volume'].to(device)  # (B, 1, 256, 256, 256)
+        xray_images = batch['drr_stacked'].to(device)  # (B, 2, 1, 512, 512)
         
         # Resize ground truth to 128³ for Stage 2
         ct_128 = resize_ct_volume(ct_volume, (128, 128, 128))
@@ -98,8 +98,8 @@ def validate_epoch(model, dataloader, criterion, epoch, device):
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
-            ct_volume = batch['ct'].to(device)
-            xray_images = batch['xrays'].to(device)
+            ct_volume = batch['ct_volume'].to(device)
+            xray_images = batch['drr_stacked'].to(device)
             
             # Resize ground truth to 128³
             ct_128 = resize_ct_volume(ct_volume, (128, 128, 128))
