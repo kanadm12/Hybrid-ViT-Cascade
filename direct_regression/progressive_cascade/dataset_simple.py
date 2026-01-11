@@ -32,6 +32,7 @@ class PatientDRRDataset(Dataset):
         split='train',
         train_split=0.8,
         val_split=0.1,
+        ct_size=256,
         drr_size=512,
         vertical_flip=True,
     ):
@@ -42,11 +43,13 @@ class PatientDRRDataset(Dataset):
             split: 'train', 'val', or 'test'
             train_split: Fraction for training
             val_split: Fraction for validation
+            ct_size: Target size for CT volumes (D, H, W) - default 256
             drr_size: Target size for DRR images (H, W) - default 512
             vertical_flip: Whether to vertically flip DRR images (default: True)
         """
         self.dataset_path = Path(dataset_path)
         self.split = split
+        self.ct_size = ct_size if isinstance(ct_size, tuple) else (ct_size, ct_size, ct_size)
         self.drr_size = drr_size
         self.vertical_flip = vertical_flip
         
@@ -99,6 +102,10 @@ class PatientDRRDataset(Dataset):
         # Normalize CT to [0, 1] using HU values
         ct_volume = np.clip(ct_volume, -1024, 3071)
         ct_volume = (ct_volume + 1024) / 4095.0
+        
+        # Resize CT volume to standard size if needed
+        if ct_volume.shape != self.ct_size:
+            ct_volume = self._resize_3d(ct_volume, self.ct_size)
         
         # Convert to torch: (D, H, W) -> (1, D, H, W)
         ct_volume = torch.from_numpy(ct_volume).unsqueeze(0)
@@ -155,6 +162,20 @@ class PatientDRRDataset(Dataset):
             img = ndimage.zoom(img, zoom_factors, order=1)
         
         return img
+    
+    @staticmethod
+    def _resize_3d(volume, target_size):
+        """Resize 3D volume to target size using scipy"""
+        from scipy import ndimage
+        
+        if isinstance(target_size, int):
+            target_size = (target_size, target_size, target_size)
+        
+        if volume.shape != target_size:
+            zoom_factors = tuple(target_size[i] / volume.shape[i] for i in range(3))
+            volume = ndimage.zoom(volume, zoom_factors, order=1)
+        
+        return volume
 
 
 def test_dataset():
