@@ -319,9 +319,9 @@ def train_stage(config, stage, checkpoint_dir):
         # Log
         log_msg = (
             f"\nEpoch {epoch}/{num_epochs} - Time: {epoch_time:.1f}s\n"
-            f"Train - Loss: {train_losses['total']:.4f} | "
+            f"Train - Loss: {train_losses['total']:.6f} | "
             f"PSNR: {train_losses['psnr']:.2f} dB | SSIM: {train_losses['ssim']:.4f}\n"
-            f"Val   - Loss: {val_losses['total']:.4f} | "
+            f"Val   - Loss: {val_losses['total']:.6f} | "
             f"PSNR: {val_losses['psnr']:.2f} dB | SSIM: {val_losses['ssim']:.4f}\n"
             f"LR: {scheduler.get_last_lr()[0]:.2e}"
         )
@@ -331,8 +331,8 @@ def train_stage(config, stage, checkpoint_dir):
         with open(log_file, 'a') as f:
             f.write(log_msg + "\n")
         
-        # Save best checkpoint
-        if val_losses['total'] < best_val_loss:
+        # Save best checkpoint based on PSNR (more reliable than loss)
+        if val_losses['psnr'] > best_psnr:
             best_val_loss = val_losses['total']
             best_psnr = val_losses['psnr']
             best_ssim = val_losses['ssim']
