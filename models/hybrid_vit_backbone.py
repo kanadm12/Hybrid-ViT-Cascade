@@ -178,7 +178,7 @@ class HybridViT3D(nn.Module):
         if D <= 64:
             target_size = 16  # Stage 1: 64³ → 16³
         elif D <= 128:
-            target_size = 24  # Stage 2: 128³ → 24³ (5.3x downsample)
+            target_size = 32  # Stage 2: 128³ → 24³ (5.3x downsample)
         else:
             target_size = 32  # Stage 3: 256³ → 32³ (8x downsample)
         downsample_factor = max(D // target_size, H // target_size, W // target_size)
