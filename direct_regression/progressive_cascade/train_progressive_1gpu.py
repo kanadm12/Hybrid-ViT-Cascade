@@ -207,7 +207,23 @@ def train_stage(config, stage, checkpoint_dir):
         if prev_checkpoint.exists():
             print(f"Loading Stage {stage-1} checkpoint: {prev_checkpoint}")
             checkpoint = torch.load(prev_checkpoint, map_location='cuda')
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            
+            # Filter checkpoint to only load weights from previous stages
+            # This handles architecture changes in later stages
+            state_dict = checkpoint['model_state_dict']
+            filtered_state_dict = {}
+            for key, value in state_dict.items():
+                # Only load weights for stages up to current stage-1
+                # e.g., if stage=2, only load xray_encoder and stage1 weights
+                if stage == 2:
+                    if not key.startswith('stage2.') and not key.startswith('stage3.'):
+                        filtered_state_dict[key] = value
+                elif stage == 3:
+                    if not key.startswith('stage3.'):
+                        filtered_state_dict[key] = value
+            
+            model.load_state_dict(filtered_state_dict, strict=False)
+            print(f"Stage {stage-1} (64³) frozen" if stage == 2 else f"Stages 1-{stage-1} frozen")
             
             # Freeze previous stages
             for prev_stage in range(1, stage):
