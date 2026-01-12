@@ -1,8 +1,13 @@
 """
 Frequency-Aware Multi-Scale Loss System
 Stage 1: L1 + SSIM (structure)
-Stage 2: + VGG perceptual (texture)
-Stage 3: + Gradient magnitude (edges) + DRR reprojection consistency
+Stage 2: + VGG perceptual (texture) + Total Variation (edges) + Frequency Domain (high-freq details)
+Stage 3: + Total Variation (edges) + Frequency Domain (fine structures) + DRR reprojection consistency
+
+STABLE LOSSES FOR MEDICAL CT:
+- Total Variation: Preserves edges without numerical instability (replaces gradient magnitude)
+- Frequency Domain: FFT-based high-frequency preservation for bones/vessels
+- Both proven more stable than raw gradient magnitude on CT's extreme HU ranges
 """
 import torch
 import torch.nn as nn
@@ -132,43 +137,97 @@ class TriPlanarVGGLoss(nn.Module):
         return total_loss / 3  # Average over 3 planes
 
 
-class GradientMagnitudeLoss(nn.Module):
+class TotalVariationLoss(nn.Module):
     """
-    Gradient magnitude loss for capturing edges and fine details
-    Emphasizes high-frequency content
+    Total Variation Loss for edge preservation and smoothness
+    More numerically stable than gradient magnitude loss
+    Proven effective in medical image reconstruction
     """
-    def __init__(self):
+    def __init__(self, eps=1e-8):
         super().__init__()
+        self.eps = eps  # Small constant for numerical stability
         
-    def compute_gradients_3d(self, volume):
-        """Compute 3D gradients using Sobel-like operators"""
-        # Gradient in D dimension
-        grad_d = volume[:, :, 1:, :, :] - volume[:, :, :-1, :, :]
-        # Gradient in H dimension
-        grad_h = volume[:, :, :, 1:, :] - volume[:, :, :, :-1, :]
-        # Gradient in W dimension
-        grad_w = volume[:, :, :, :, 1:] - volume[:, :, :, :, :-1]
+    def forward(self, pred_volume, target_volume=None):
+        """
+        Compute TV loss on prediction (and optionally match target TV)
+        Args:
+            pred_volume: (B, 1, D, H, W)
+            target_volume: (B, 1, D, H, W) - optional, for matching target smoothness
+        Returns:
+            tv_loss: scalar
+        """
+        # Compute differences along each dimension
+        diff_d = torch.abs(pred_volume[:, :, 1:, :, :] - pred_volume[:, :, :-1, :, :])
+        diff_h = torch.abs(pred_volume[:, :, :, 1:, :] - pred_volume[:, :, :, :-1, :])
+        diff_w = torch.abs(pred_volume[:, :, :, :, 1:] - pred_volume[:, :, :, :, :-1])
         
-        return grad_d, grad_h, grad_w
-    
+        # TV loss with epsilon for stability
+        tv_pred = torch.sqrt(diff_d.pow(2) + self.eps).mean() + \
+                  torch.sqrt(diff_h.pow(2) + self.eps).mean() + \
+                  torch.sqrt(diff_w.pow(2) + self.eps).mean()
+        
+        # If target provided, match its TV characteristics
+        if target_volume is not None:
+            diff_d_t = torch.abs(target_volume[:, :, 1:, :, :] - target_volume[:, :, :-1, :, :])
+            diff_h_t = torch.abs(target_volume[:, :, :, 1:, :] - target_volume[:, :, :, :-1, :])
+            diff_w_t = torch.abs(target_volume[:, :, :, :, 1:] - target_volume[:, :, :, :, :-1])
+            
+            tv_target = torch.sqrt(diff_d_t.pow(2) + self.eps).mean() + \
+                       torch.sqrt(diff_h_t.pow(2) + self.eps).mean() + \
+                       torch.sqrt(diff_w_t.pow(2) + self.eps).mean()
+            
+            # Encourage pred TV to match target TV (preserves edge sharpness)
+            return F.l1_loss(tv_pred, tv_target)
+        
+        return tv_pred / 3  # Average over 3 dimensions
+
+
+class FrequencyLoss(nn.Module):
+    """
+    FFT-based Frequency Domain Loss
+    Preserves high-frequency details (edges, fine structures)
+    """
+    def __init__(self, high_freq_weight=2.0):
+        super().__init__()
+        self.high_freq_weight = high_freq_weight
+        
     def forward(self, pred_volume, target_volume):
         """
         Args:
             pred_volume, target_volume: (B, 1, D, H, W)
         Returns:
-            gradient_loss: scalar
+            freq_loss: scalar
         """
-        pred_grads = self.compute_gradients_3d(pred_volume)
-        target_grads = self.compute_gradients_3d(target_volume)
+        # Compute 3D FFT
+        pred_fft = torch.fft.fftn(pred_volume, dim=(-3, -2, -1))
+        target_fft = torch.fft.fftn(target_volume, dim=(-3, -2, -1))
         
-        loss = 0.0
-        for pred_grad, target_grad in zip(pred_grads, target_grads):
-            # Compute gradient magnitude
-            pred_mag = torch.abs(pred_grad)
-            target_mag = torch.abs(target_grad)
-            loss += F.l1_loss(pred_mag, target_mag)
+        # Get magnitude spectrum
+        pred_mag = torch.abs(pred_fft)
+        target_mag = torch.abs(target_fft)
         
-        return loss / 3  # Average over 3 dimensions
+        # Create high-frequency mask (outer regions of spectrum)
+        D, H, W = pred_volume.shape[-3:]
+        center_d, center_h, center_w = D // 2, H // 2, W // 2
+        radius = min(D, H, W) // 4
+        
+        # Distance from center for each frequency
+        d_coords = torch.arange(D, device=pred_volume.device).float() - center_d
+        h_coords = torch.arange(H, device=pred_volume.device).float() - center_h
+        w_coords = torch.arange(W, device=pred_volume.device).float() - center_w
+        
+        dd, hh, ww = torch.meshgrid(d_coords, h_coords, w_coords, indexing='ij')
+        dist = torch.sqrt(dd**2 + hh**2 + ww**2)
+        
+        # High-freq mask (1 for high freq, 0 for low freq)
+        high_freq_mask = (dist > radius).float()
+        high_freq_mask = high_freq_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, D, H, W)
+        
+        # Weighted loss: emphasize high frequencies
+        low_freq_loss = F.l1_loss(pred_mag * (1 - high_freq_mask), target_mag * (1 - high_freq_mask))
+        high_freq_loss = F.l1_loss(pred_mag * high_freq_mask, target_mag * high_freq_mask)
+        
+        return low_freq_loss + self.high_freq_weight * high_freq_loss
 
 
 class DRRReprojectionLoss(nn.Module):
@@ -260,19 +319,23 @@ class Stage1Loss(nn.Module):
 
 class Stage2Loss(nn.Module):
     """
-    Stage 2 Loss: L1 + SSIM + VGG Perceptual + Gradient
-    Focus: Add texture, edges, and anatomical detail
+    Stage 2 Loss: L1 + SSIM + VGG Perceptual + Total Variation + Frequency
+    Focus: Texture, edges, anatomical detail with stable loss functions
+    TV Loss: Edge preservation (stable alternative to gradient magnitude)
+    Frequency Loss: High-frequency detail preservation (bones, vessels)
     """
-    def __init__(self, l1_weight=1.0, ssim_weight=0.5, vgg_weight=0.1, gradient_weight=0.15):
+    def __init__(self, l1_weight=1.0, ssim_weight=0.5, vgg_weight=0.1, tv_weight=0.02, freq_weight=0.05):
         super().__init__()
         self.l1_weight = l1_weight
         self.ssim_weight = ssim_weight
         self.vgg_weight = vgg_weight
-        self.gradient_weight = gradient_weight
+        self.tv_weight = tv_weight
+        self.freq_weight = freq_weight
         
         self.ssim_loss = SSIMLoss()
         self.vgg_loss = TriPlanarVGGLoss()
-        self.gradient_loss = GradientMagnitudeLoss()
+        self.tv_loss = TotalVariationLoss()
+        self.freq_loss = FrequencyLoss(high_freq_weight=2.0)
     
     def forward(self, pred, target):
         """
@@ -284,39 +347,44 @@ class Stage2Loss(nn.Module):
         l1_loss = F.l1_loss(pred, target)
         ssim_loss = self.ssim_loss(pred, target)
         vgg_loss = self.vgg_loss(pred, target)
-        gradient_loss = self.gradient_loss(pred, target)
+        tv_loss = self.tv_loss(pred, target)  # Match target TV characteristics
+        freq_loss = self.freq_loss(pred, target)
         
         total_loss = (self.l1_weight * l1_loss + 
                      self.ssim_weight * ssim_loss + 
                      self.vgg_weight * vgg_loss +
-                     self.gradient_weight * gradient_loss)
+                     self.tv_weight * tv_loss +
+                     self.freq_weight * freq_loss)
         
         return {
             'total_loss': total_loss,
             'l1_loss': l1_loss,
             'ssim_loss': ssim_loss,
             'vgg_loss': vgg_loss,
-            'gradient_loss': gradient_loss
+            'tv_loss': tv_loss,
+            'freq_loss': freq_loss
         }
 
 
 class Stage3Loss(nn.Module):
     """
-    Stage 3 Loss: L1 + SSIM + VGG + Gradient + DRR Reprojection
-    Focus: Capture fine details, edges, and geometric consistency
+    Stage 3 Loss: L1 + SSIM + VGG + Total Variation + Frequency + DRR Reprojection
+    Focus: Fine details, edges, geometric consistency with stable losses
     """
     def __init__(self, l1_weight=1.0, ssim_weight=0.5, vgg_weight=0.1, 
-                 gradient_weight=0.2, drr_weight=0.3):
+                 tv_weight=0.03, freq_weight=0.07, drr_weight=0.3):
         super().__init__()
         self.l1_weight = l1_weight
         self.ssim_weight = ssim_weight
         self.vgg_weight = vgg_weight
-        self.gradient_weight = gradient_weight
+        self.tv_weight = tv_weight
+        self.freq_weight = freq_weight
         self.drr_weight = drr_weight
         
         self.ssim_loss = SSIMLoss()
         self.vgg_loss = TriPlanarVGGLoss()
-        self.gradient_loss = GradientMagnitudeLoss()
+        self.tv_loss = TotalVariationLoss()
+        self.freq_loss = FrequencyLoss(high_freq_weight=2.0)
         self.drr_loss = DRRReprojectionLoss()
     
     def forward(self, pred, target, input_xrays=None):
@@ -330,19 +398,22 @@ class Stage3Loss(nn.Module):
         l1_loss = F.l1_loss(pred, target)
         ssim_loss = self.ssim_loss(pred, target)
         vgg_loss = self.vgg_loss(pred, target)
-        gradient_loss = self.gradient_loss(pred, target)
+        tv_loss = self.tv_loss(pred, target)
+        freq_loss = self.freq_loss(pred, target)
         
         total_loss = (self.l1_weight * l1_loss + 
                      self.ssim_weight * ssim_loss + 
                      self.vgg_weight * vgg_loss +
-                     self.gradient_weight * gradient_loss)
+                     self.tv_weight * tv_loss +
+                     self.freq_weight * freq_loss)
         
         loss_dict = {
             'total_loss': total_loss,
             'l1_loss': l1_loss,
             'ssim_loss': ssim_loss,
             'vgg_loss': vgg_loss,
-            'gradient_loss': gradient_loss
+            'tv_loss': tv_loss,
+            'freq_loss': freq_loss
         }
         
         # Add DRR reprojection loss if X-rays are provided
