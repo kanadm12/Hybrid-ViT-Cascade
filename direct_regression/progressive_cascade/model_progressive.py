@@ -173,7 +173,7 @@ class Stage2Refiner128(nn.Module):
             nn.GELU()
         )
         
-        # Refinement ViT for 128³
+        # Refinement ViT for 128³ with 16³ tokens (4096) - memory safe and stable
         self.vit_refiner = HybridViT3D(
             volume_size=volume_size,
             in_channels=32,
@@ -182,7 +182,8 @@ class Stage2Refiner128(nn.Module):
             num_heads=num_heads,
             context_dim=xray_feature_dim,
             cond_dim=1024,
-            use_prev_stage=False
+            use_prev_stage=False,
+            target_size=16  # Force 16³ tokens (4096) for memory safety
         )
         
         # Residual connection
@@ -243,6 +244,7 @@ class Stage3Refiner256(nn.Module):
         )
         
         # Refinement ViT for 256³ (with gradient checkpointing option)
+        # Using 16³ tokens (4096) due to memory constraints - 32³ would be 32768 tokens (OOM)
         self.vit_refiner = HybridViT3D(
             volume_size=volume_size,
             in_channels=32,
@@ -251,7 +253,8 @@ class Stage3Refiner256(nn.Module):
             num_heads=num_heads,
             context_dim=xray_feature_dim,
             cond_dim=1024,
-            use_prev_stage=False
+            use_prev_stage=False,
+            target_size=16  # Force 16³ tokens (4096) - 32³ causes OOM on A100 80GB
         )
         
         # High-frequency enhancement
