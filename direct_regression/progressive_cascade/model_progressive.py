@@ -182,8 +182,7 @@ class Stage2Refiner128(nn.Module):
             num_heads=num_heads,
             context_dim=xray_feature_dim,
             cond_dim=1024,
-            use_prev_stage=False,
-            target_size=16  # Force 16³ tokens (4096) for memory safety
+            use_prev_stage=False
         )
         
         # Residual connection
@@ -253,8 +252,7 @@ class Stage3Refiner256(nn.Module):
             num_heads=num_heads,
             context_dim=xray_feature_dim,
             cond_dim=1024,
-            use_prev_stage=False,
-            target_size=16  # Force 16³ tokens (4096) - 32³ causes OOM on A100 80GB
+            use_prev_stage=False
         )
         
         # High-frequency enhancement
