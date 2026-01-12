@@ -450,7 +450,7 @@ def main():
     total_start = time.time()
     
     # Start stage (1, 2, or 3) - change this to skip completed stages
-    start_stage = 1  # Change to 2 to skip Stage 1, or 3 to skip Stages 1-2
+    start_stage = 2  # Stage 1 completed (27.13 dB PSNR), starting from Stage 2
     
     for stage in range(start_stage, 4):
         print(f"\n{'#'*60}")
