@@ -203,7 +203,16 @@ class AnatomicalAttentionLoss(nn.Module):
             
             # Combine gradients as importance map
             importance = (grad_d + grad_h + grad_w) / 3
-            importance = (importance - importance.min()) / (importance.max() - importance.min() + 1e-8)
+            
+            # Safe normalization: handle flat regions (min == max)
+            importance_min = importance.min()
+            importance_max = importance.max()
+            importance_range = importance_max - importance_min
+            
+            if importance_range > 1e-6:  # Non-flat region
+                importance = (importance - importance_min) / (importance_range + 1e-8)
+            else:  # Flat region (no edges) - uniform weights
+                importance = torch.ones_like(importance) * 0.5
         
         # Refine attention with learned network
         attention = self.attention_net(importance)
@@ -229,9 +238,15 @@ class ResidualDenseBlock(nn.Module):
         self.layers = nn.ModuleList()
         
         for i in range(num_layers):
+            # Compute valid num_groups for this layer
+            layer_channels = in_channels + i * growth_rate
+            num_groups = min(8, growth_rate)
+            while growth_rate % num_groups != 0:
+                num_groups -= 1
+            
             self.layers.append(nn.Sequential(
-                nn.Conv3d(in_channels + i * growth_rate, growth_rate, 3, padding=1),
-                nn.GroupNorm(8, growth_rate),
+                nn.Conv3d(layer_channels, growth_rate, 3, padding=1),
+                nn.GroupNorm(num_groups, growth_rate),
                 nn.GELU()
             ))
         
@@ -357,35 +372,30 @@ class Direct256Model_H200(nn.Module):
         """
         B = xrays.shape[0]
         
-        # Encode X-rays
+        # Encode X-rays (shared features)
         xray_features_2d, _, _ = self.xray_encoder(xrays, stage=3)
+        
+        # Pre-compute X-ray features at all scales (memory efficient: do once, reuse 3 times)
+        xray_feat_64 = F.interpolate(xray_features_2d, size=(64, 64), mode='bilinear', align_corners=False)
+        xray_feat_64_3d = xray_feat_64.unsqueeze(2).repeat(1, 1, 64, 1, 1)  # (B, C, 64, 64, 64)
+        
+        xray_feat_128 = F.interpolate(xray_features_2d, size=(128, 128), mode='bilinear', align_corners=False)
+        xray_feat_128_3d = xray_feat_128.unsqueeze(2).repeat(1, 1, 128, 1, 1)  # (B, C, 128, 128, 128)
+        
+        xray_feat_256 = F.interpolate(xray_features_2d, size=(256, 256), mode='bilinear', align_corners=False)
+        xray_feat_256_3d = xray_feat_256.unsqueeze(2).repeat(1, 1, 256, 1, 1)  # (B, C, 256, 256, 256)
         
         # Expand initial volume
         x = self.initial_volume.expand(B, -1, -1, -1, -1)
         
         # Encoder path with X-ray fusion
         x_64 = self.enc_32_64(x)  # (B, 64, 64, 64, 64)
-        
-        # Fuse with X-ray features at 64³
-        # Properly broadcast 2D features (B, C, H, W) to 3D (B, C, D, H, W)
-        xray_feat_64 = F.interpolate(xray_features_2d, size=(64, 64), mode='bilinear', align_corners=False)
-        xray_feat_64_3d = xray_feat_64.unsqueeze(2).repeat(1, 1, 64, 1, 1)  # (B, C, 64, 64, 64)
         x_64_fused = self.xray_fusion_64(torch.cat([x_64, xray_feat_64_3d], dim=1))
         
-        # Continue encoding
         x_128 = self.enc_64_128(x_64_fused)  # (B, 128, 128, 128, 128)
-        
-        # Fuse at 128³
-        xray_feat_128 = F.interpolate(xray_features_2d, size=(128, 128), mode='bilinear', align_corners=False)
-        xray_feat_128_3d = xray_feat_128.unsqueeze(2).repeat(1, 1, 128, 1, 1)  # (B, C, 128, 128, 128)
         x_128_fused = self.xray_fusion_128(torch.cat([x_128, xray_feat_128_3d], dim=1))
         
-        # Final upsampling to 256³
         x_256 = self.enc_128_256(x_128_fused)  # (B, 256, 256, 256, 256)
-        
-        # Fuse at 256³
-        xray_feat_256 = F.interpolate(xray_features_2d, size=(256, 256), mode='bilinear', align_corners=False)
-        xray_feat_256_3d = xray_feat_256.unsqueeze(2).repeat(1, 1, 256, 1, 1)  # (B, C, 256, 256, 256)
         x_256_fused = self.xray_fusion_256(torch.cat([x_256, xray_feat_256_3d], dim=1))
         
         # Final refinement
