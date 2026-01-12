@@ -71,25 +71,19 @@ class PerceptualFeaturePyramidLoss(nn.Module):
         super().__init__()
         self.scales = scales
         
-        # Use 3D convolutional feature extractor (trained on medical data would be better)
-        self.feature_extractors = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv3d(1, 32, 3, padding=1),
-                nn.GroupNorm(8, 32),
-                nn.GELU(),
-                nn.Conv3d(32, 64, 3, padding=1),
-                nn.GroupNorm(16, 64),
-                nn.GELU(),
-                nn.Conv3d(64, 128, 3, stride=2, padding=1),
-                nn.GroupNorm(32, 128),
-                nn.GELU()
-            ) for _ in scales
-        ])
-        
-        # Freeze extractors (or train with model)
-        for extractor in self.feature_extractors:
-            for param in extractor.parameters():
-                param.requires_grad = False
+        # Shared 3D feature extractor (trained jointly with model)
+        self.feature_extractor = nn.Sequential(
+            nn.Conv3d(1, 32, 3, padding=1),
+            nn.GroupNorm(8, 32),
+            nn.GELU(),
+            nn.Conv3d(32, 64, 3, padding=1),
+            nn.GroupNorm(16, 64),
+            nn.GELU(),
+            nn.Conv3d(64, 128, 3, stride=2, padding=1),
+            nn.GroupNorm(32, 128),
+            nn.GELU()
+        )
+        # Not frozen - trains with model for better perceptual features
     
     def forward(self, pred, target):
         """
@@ -98,7 +92,7 @@ class PerceptualFeaturePyramidLoss(nn.Module):
         """
         total_loss = 0.0
         
-        for scale, extractor in zip(self.scales, self.feature_extractors):
+        for scale in self.scales:
             if scale != 1.0:
                 # Downsample volumes
                 size = [int(s * scale) for s in pred.shape[-3:]]
@@ -108,9 +102,9 @@ class PerceptualFeaturePyramidLoss(nn.Module):
                 pred_scaled = pred
                 target_scaled = target
             
-            # Extract features
-            pred_feat = extractor(pred_scaled)
-            target_feat = extractor(target_scaled)
+            # Extract features with shared extractor
+            pred_feat = self.feature_extractor(pred_scaled)
+            target_feat = self.feature_extractor(target_scaled)
             
             # Perceptual loss at this scale
             total_loss += F.l1_loss(pred_feat, target_feat)
@@ -127,7 +121,7 @@ class Style3DLoss(nn.Module):
     def __init__(self):
         super().__init__()
         
-        # Feature extractor for style
+        # Feature extractor for style (trainable)
         self.feature_extractor = nn.Sequential(
             nn.Conv3d(1, 32, 3, padding=1),
             nn.GroupNorm(8, 32),
@@ -137,10 +131,7 @@ class Style3DLoss(nn.Module):
             nn.GELU(),
             nn.Conv3d(64, 64, 3, padding=1)
         )
-        
-        # Freeze
-        for param in self.feature_extractor.parameters():
-            param.requires_grad = False
+        # Trainable - learns style features for medical CT
     
     def gram_matrix(self, features):
         """
@@ -346,9 +337,14 @@ class Direct256Model_H200(nn.Module):
     
     def _make_xray_fusion(self, voxel_channels, xray_feature_dim):
         """Create X-ray feature fusion module"""
+        # Compute valid num_groups (must divide voxel_channels evenly)
+        num_groups = min(32, voxel_channels)
+        while voxel_channels % num_groups != 0:
+            num_groups -= 1
+        
         return nn.Sequential(
             nn.Conv3d(voxel_channels + xray_feature_dim, voxel_channels, 1),
-            nn.GroupNorm(voxel_channels // 4, voxel_channels),
+            nn.GroupNorm(num_groups, voxel_channels),
             nn.GELU()
         )
     
@@ -371,25 +367,26 @@ class Direct256Model_H200(nn.Module):
         x_64 = self.enc_32_64(x)  # (B, 64, 64, 64, 64)
         
         # Fuse with X-ray features at 64³
+        # Properly broadcast 2D features (B, C, H, W) to 3D (B, C, D, H, W)
         xray_feat_64 = F.interpolate(xray_features_2d, size=(64, 64), mode='bilinear', align_corners=False)
-        xray_feat_64 = xray_feat_64.unsqueeze(2).expand(-1, -1, 64, -1, -1)  # (B, C, 64, 64, 64)
-        x_64_fused = self.xray_fusion_64(torch.cat([x_64, xray_feat_64], dim=1))
+        xray_feat_64_3d = xray_feat_64.unsqueeze(2).repeat(1, 1, 64, 1, 1)  # (B, C, 64, 64, 64)
+        x_64_fused = self.xray_fusion_64(torch.cat([x_64, xray_feat_64_3d], dim=1))
         
         # Continue encoding
         x_128 = self.enc_64_128(x_64_fused)  # (B, 128, 128, 128, 128)
         
         # Fuse at 128³
         xray_feat_128 = F.interpolate(xray_features_2d, size=(128, 128), mode='bilinear', align_corners=False)
-        xray_feat_128 = xray_feat_128.unsqueeze(2).expand(-1, -1, 128, -1, -1)
-        x_128_fused = self.xray_fusion_128(torch.cat([x_128, xray_feat_128], dim=1))
+        xray_feat_128_3d = xray_feat_128.unsqueeze(2).repeat(1, 1, 128, 1, 1)  # (B, C, 128, 128, 128)
+        x_128_fused = self.xray_fusion_128(torch.cat([x_128, xray_feat_128_3d], dim=1))
         
         # Final upsampling to 256³
         x_256 = self.enc_128_256(x_128_fused)  # (B, 256, 256, 256, 256)
         
         # Fuse at 256³
         xray_feat_256 = F.interpolate(xray_features_2d, size=(256, 256), mode='bilinear', align_corners=False)
-        xray_feat_256 = xray_feat_256.unsqueeze(2).expand(-1, -1, 256, -1, -1)
-        x_256_fused = self.xray_fusion_256(torch.cat([x_256, xray_feat_256], dim=1))
+        xray_feat_256_3d = xray_feat_256.unsqueeze(2).repeat(1, 1, 256, 1, 1)  # (B, C, 256, 256, 256)
+        x_256_fused = self.xray_fusion_256(torch.cat([x_256, xray_feat_256_3d], dim=1))
         
         # Final refinement
         volume_256 = self.final_refine(x_256_fused)
