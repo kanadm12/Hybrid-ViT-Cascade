@@ -438,8 +438,8 @@ class MultiScaleLoss(nn.Module):
         if config is None:
             config = {
                 'stage1': {'l1': 1.0, 'ssim': 0.5},
-                'stage2': {'l1': 1.0, 'ssim': 0.5, 'vgg': 0.1},
-                'stage3': {'l1': 1.0, 'ssim': 0.5, 'vgg': 0.1, 'gradient': 0.2, 'drr': 0.3}
+                'stage2': {'l1': 1.0, 'ssim': 0.5, 'vgg': 0.1, 'tv': 0.02, 'freq': 0.05},
+                'stage3': {'l1': 1.0, 'ssim': 0.5, 'vgg': 0.1, 'tv': 0.03, 'freq': 0.07, 'drr': 0.3}
             }
         
         self.stage1_loss = Stage1Loss(
@@ -450,14 +450,17 @@ class MultiScaleLoss(nn.Module):
         self.stage2_loss = Stage2Loss(
             l1_weight=config['stage2']['l1'],
             ssim_weight=config['stage2']['ssim'],
-            vgg_weight=config['stage2']['vgg']
+            vgg_weight=config['stage2']['vgg'],
+            tv_weight=config['stage2'].get('tv', 0.02),
+            freq_weight=config['stage2'].get('freq', 0.05)
         )
         
         self.stage3_loss = Stage3Loss(
             l1_weight=config['stage3']['l1'],
             ssim_weight=config['stage3']['ssim'],
             vgg_weight=config['stage3']['vgg'],
-            gradient_weight=config['stage3']['gradient'],
+            tv_weight=config['stage3'].get('tv', 0.03),
+            freq_weight=config['stage3'].get('freq', 0.07),
             drr_weight=config['stage3']['drr']
         )
     
