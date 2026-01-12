@@ -72,6 +72,7 @@ class PerceptualFeaturePyramidLoss(nn.Module):
         self.scales = scales
         
         # Shared 3D feature extractor (trained jointly with model)
+        # NO STRIDE - preserves full 256³ resolution for accurate perceptual matching
         self.feature_extractor = nn.Sequential(
             nn.Conv3d(1, 32, 3, padding=1),
             nn.GroupNorm(8, 32),
@@ -79,7 +80,7 @@ class PerceptualFeaturePyramidLoss(nn.Module):
             nn.Conv3d(32, 64, 3, padding=1),
             nn.GroupNorm(16, 64),
             nn.GELU(),
-            nn.Conv3d(64, 128, 3, stride=2, padding=1),
+            nn.Conv3d(64, 128, 3, padding=1),  # Removed stride=2 - preserves resolution
             nn.GroupNorm(32, 128),
             nn.GELU()
         )
@@ -338,6 +339,27 @@ class Direct256Model_H200(nn.Module):
         self.xray_fusion_128 = self._make_xray_fusion(128, xray_feature_dim)
         self.xray_fusion_256 = self._make_xray_fusion(256, xray_feature_dim)
         
+        # Skip connection projections for multi-scale feature fusion (preserves high-freq details)
+        self.skip_proj_64_to_256 = nn.Sequential(
+            nn.Upsample(scale_factor=4, mode='trilinear', align_corners=False),
+            nn.Conv3d(64, 64, 3, padding=1),
+            nn.GroupNorm(16, 64),
+            nn.GELU()
+        )
+        self.skip_proj_128_to_256 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(128, 128, 3, padding=1),
+            nn.GroupNorm(32, 128),
+            nn.GELU()
+        )
+        
+        # Multi-scale fusion before final refinement
+        self.multiscale_fusion = nn.Sequential(
+            nn.Conv3d(256 + 128 + 64, 256, 1),  # Combine all scales
+            nn.GroupNorm(64, 256),
+            nn.GELU()
+        )
+        
         # Final refinement
         self.final_refine = nn.Sequential(
             ResidualDenseBlock(256),
@@ -375,15 +397,24 @@ class Direct256Model_H200(nn.Module):
         # Encode X-rays (shared features)
         xray_features_2d, _, _ = self.xray_encoder(xrays, stage=3)
         
-        # Pre-compute X-ray features at all scales (memory efficient: do once, reuse 3 times)
+        # Depth-aware X-ray projection (learnable weights along depth)
+        # Creates depth-varying features instead of naive repetition
+        depth_weights_64 = torch.linspace(0, 1, 64, device=xrays.device).view(1, 1, 64, 1, 1)
+        depth_weights_128 = torch.linspace(0, 1, 128, device=xrays.device).view(1, 1, 128, 1, 1)
+        depth_weights_256 = torch.linspace(0, 1, 256, device=xrays.device).view(1, 1, 256, 1, 1)
+        
+        # Pre-compute X-ray features at all scales with depth modulation
         xray_feat_64 = F.interpolate(xray_features_2d, size=(64, 64), mode='bilinear', align_corners=False)
-        xray_feat_64_3d = xray_feat_64.unsqueeze(2).repeat(1, 1, 64, 1, 1)  # (B, C, 64, 64, 64)
+        xray_feat_64_3d = xray_feat_64.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_64 * 3.14159))  # Depth-modulated
+        xray_feat_64_3d = xray_feat_64_3d.repeat(1, 1, 64, 1, 1)
         
         xray_feat_128 = F.interpolate(xray_features_2d, size=(128, 128), mode='bilinear', align_corners=False)
-        xray_feat_128_3d = xray_feat_128.unsqueeze(2).repeat(1, 1, 128, 1, 1)  # (B, C, 128, 128, 128)
+        xray_feat_128_3d = xray_feat_128.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_128 * 3.14159))
+        xray_feat_128_3d = xray_feat_128_3d.repeat(1, 1, 128, 1, 1)
         
         xray_feat_256 = F.interpolate(xray_features_2d, size=(256, 256), mode='bilinear', align_corners=False)
-        xray_feat_256_3d = xray_feat_256.unsqueeze(2).repeat(1, 1, 256, 1, 1)  # (B, C, 256, 256, 256)
+        xray_feat_256_3d = xray_feat_256.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_256 * 3.14159))
+        xray_feat_256_3d = xray_feat_256_3d.repeat(1, 1, 256, 1, 1)
         
         # Expand initial volume
         x = self.initial_volume.expand(B, -1, -1, -1, -1)
@@ -398,8 +429,17 @@ class Direct256Model_H200(nn.Module):
         x_256 = self.enc_128_256(x_128_fused)  # (B, 256, 256, 256, 256)
         x_256_fused = self.xray_fusion_256(torch.cat([x_256, xray_feat_256_3d], dim=1))
         
-        # Final refinement
-        volume_256 = self.final_refine(x_256_fused)
+        # Multi-scale skip connections: bring 64³ and 128³ features to 256³
+        skip_64 = self.skip_proj_64_to_256(x_64_fused)  # (B, 64, 256, 256, 256)
+        skip_128 = self.skip_proj_128_to_256(x_128_fused)  # (B, 128, 256, 256, 256)
+        
+        # Fuse all scales (preserves fine details from lower resolutions)
+        x_256_multiscale = self.multiscale_fusion(
+            torch.cat([x_256_fused, skip_128, skip_64], dim=1)
+        )  # (B, 256, 256, 256, 256)
+        
+        # Final refinement with multi-scale features
+        volume_256 = self.final_refine(x_256_multiscale)
         
         return volume_256
 
