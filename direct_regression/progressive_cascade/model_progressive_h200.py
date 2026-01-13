@@ -6,14 +6,40 @@ Target: Maximum quality with 2x memory headroom vs A100
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import sys
-from pathlib import Path
 
-# Import base components
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from models.xray_encoder import XrayEncoder
-from models.diagnostic_losses import XrayConditioningModule
-from models.hybrid_vit_backbone import HybridViT3D
+
+class SimpleXrayEncoder(nn.Module):
+    """Simple 2D CNN encoder for bi-planar X-rays"""
+    def __init__(self, img_size=512, feature_dim=512, num_views=2):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(num_views, 64, 7, stride=2, padding=3),
+            nn.GroupNorm(16, 64),
+            nn.GELU(),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1),
+            nn.GroupNorm(32, 128),
+            nn.GELU(),
+            nn.Conv2d(128, 256, 3, stride=2, padding=1),
+            nn.GroupNorm(64, 256),
+            nn.GELU(),
+            nn.Conv2d(256, feature_dim, 3, stride=2, padding=1),
+            nn.GroupNorm(64, feature_dim),
+            nn.GELU()
+        )
+    
+    def forward(self, xrays, stage=3):
+        """
+        Args:
+            xrays: (B, 2, 1, 512, 512) - bi-planar X-rays
+            stage: ignored for compatibility
+        Returns:
+            features: (B, feature_dim, 32, 32)
+            _, _: dummy outputs for compatibility
+        """
+        B = xrays.shape[0]
+        xrays = xrays.squeeze(2)  # (B, 2, H, W)
+        features = self.encoder(xrays)  # (B, feature_dim, 32, 32)
+        return features, None, None
 
 
 class Stage2Refiner128_H200(nn.Module):
