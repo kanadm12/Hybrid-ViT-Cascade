@@ -405,16 +405,14 @@ class Direct256Model_H200(nn.Module):
         
         # Pre-compute X-ray features at all scales with depth modulation
         xray_feat_64 = F.interpolate(xray_features_2d, size=(64, 64), mode='bilinear', align_corners=False)
-        xray_feat_64_3d = xray_feat_64.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_64 * 3.14159))  # Depth-modulated
-        xray_feat_64_3d = xray_feat_64_3d.repeat(1, 1, 64, 1, 1)
+        # Broadcasting with depth_weights_64 already creates a (B, C, 64, 64, 64) tensor; no extra repeat needed
+        xray_feat_64_3d = xray_feat_64.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_64 * 3.14159))  # (B, C, 64, 64, 64)
         
         xray_feat_128 = F.interpolate(xray_features_2d, size=(128, 128), mode='bilinear', align_corners=False)
-        xray_feat_128_3d = xray_feat_128.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_128 * 3.14159))
-        xray_feat_128_3d = xray_feat_128_3d.repeat(1, 1, 128, 1, 1)
+        xray_feat_128_3d = xray_feat_128.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_128 * 3.14159))  # (B, C, 128, 128, 128)
         
         xray_feat_256 = F.interpolate(xray_features_2d, size=(256, 256), mode='bilinear', align_corners=False)
-        xray_feat_256_3d = xray_feat_256.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_256 * 3.14159))
-        xray_feat_256_3d = xray_feat_256_3d.repeat(1, 1, 256, 1, 1)
+        xray_feat_256_3d = xray_feat_256.unsqueeze(2) * (1 + 0.3 * torch.sin(depth_weights_256 * 3.14159))  # (B, C, 256, 256, 256)
         
         # Expand initial volume
         x = self.initial_volume.expand(B, -1, -1, -1, -1)
