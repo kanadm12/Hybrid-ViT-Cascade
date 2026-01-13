@@ -37,7 +37,7 @@ def parse_args():
 def load_checkpoint(checkpoint_path, device):
     """Load trained model checkpoint"""
     print(f"Loading checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
     model = Direct128Model_H200(
         xray_img_size=512,
@@ -46,14 +46,33 @@ def load_checkpoint(checkpoint_path, device):
         use_checkpoint=False  # Disable checkpointing for inference
     )
     
-    model.load_state_dict(checkpoint['model_state_dict'])
+    # Handle different checkpoint formats
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+        epoch = checkpoint.get('epoch', 'N/A')
+        val_psnr = checkpoint.get('val_psnr', 'N/A')
+        val_ssim = checkpoint.get('val_ssim', 'N/A')
+    elif 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+        epoch = checkpoint.get('epoch', 'N/A')
+        val_psnr = checkpoint.get('psnr', checkpoint.get('val_psnr', 'N/A'))
+        val_ssim = checkpoint.get('ssim', checkpoint.get('val_ssim', 'N/A'))
+    else:
+        # Assume checkpoint is just the state dict
+        model.load_state_dict(checkpoint)
+        epoch = 'N/A'
+        val_psnr = 'N/A'
+        val_ssim = 'N/A'
+    
     model = model.to(device)
     model.eval()
     
     print(f"✓ Checkpoint loaded successfully")
-    print(f"  - Epoch: {checkpoint.get('epoch', 'N/A')}")
-    print(f"  - PSNR: {checkpoint.get('val_psnr', 'N/A'):.2f} dB")
-    print(f"  - SSIM: {checkpoint.get('val_ssim', 'N/A'):.4f}")
+    print(f"  - Epoch: {epoch}")
+    if val_psnr != 'N/A':
+        print(f"  - PSNR: {val_psnr:.2f} dB")
+    if val_ssim != 'N/A':
+        print(f"  - SSIM: {val_ssim:.4f}")
     
     return model
 
