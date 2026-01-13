@@ -23,8 +23,8 @@ def parse_args():
                         help="Path to DRR patient dataset root")
     parser.add_argument("--save_dir", type=str, default="checkpoints_direct256_h200",
                         help="Directory to save checkpoints and logs")
-    parser.add_argument("--batch_size", type=int, default=2,
-                        help="Batch size (H200: 2-3 recommended)")
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="Batch size (H200: 1 recommended for 256^3)")
     parser.add_argument("--num_epochs", type=int, default=180,
                         help="Number of training epochs (150-200 recommended)")
     parser.add_argument("--lr", type=float, default=1e-4,

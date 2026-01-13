@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from torch.utils.checkpoint import checkpoint
 
 
 class SimpleXrayEncoder(nn.Module):
@@ -327,8 +328,10 @@ class Direct256Model_H200(nn.Module):
                  xray_img_size=512,
                  xray_feature_dim=512,
                  voxel_dim=256,
-                 num_rdb=6):  # Number of Residual Dense Blocks
+                 num_rdb=3,  # Reduced from 6 to 3 for H200 memory constraints
+                 use_checkpoint=True):  # Enable gradient checkpointing
         super().__init__()
+        self.use_checkpoint = use_checkpoint
         
         # X-ray encoder
         self.xray_encoder = SimpleXrayEncoder(
@@ -359,16 +362,16 @@ class Direct256Model_H200(nn.Module):
         
         self.enc_128_256 = nn.Sequential(
             nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
-            nn.Conv3d(128, 256, 3, padding=1),
-            nn.GroupNorm(64, 256),
+            nn.Conv3d(128, 192, 3, padding=1),  # Reduced from 256 to 192
+            nn.GroupNorm(48, 192),
             nn.GELU(),
-            *[ResidualDenseBlock(256) for _ in range(num_rdb)]
+            *[ResidualDenseBlock(192, growth_rate=24) for _ in range(num_rdb)]  # Reduced growth_rate
         )
         
         # Cross-attention with X-ray features at each scale
         self.xray_fusion_64 = self._make_xray_fusion(64, xray_feature_dim)
         self.xray_fusion_128 = self._make_xray_fusion(128, xray_feature_dim)
-        self.xray_fusion_256 = self._make_xray_fusion(256, xray_feature_dim)
+        self.xray_fusion_256 = self._make_xray_fusion(192, xray_feature_dim)  # Updated to 192
         
         # Skip connection projections for multi-scale feature fusion (preserves high-freq details)
         self.skip_proj_64_to_256 = nn.Sequential(
@@ -386,15 +389,15 @@ class Direct256Model_H200(nn.Module):
         
         # Multi-scale fusion before final refinement
         self.multiscale_fusion = nn.Sequential(
-            nn.Conv3d(256 + 128 + 64, 256, 1),  # Combine all scales
-            nn.GroupNorm(64, 256),
+            nn.Conv3d(192 + 128 + 64, 192, 1),  # Combine all scales (192+128+64)
+            nn.GroupNorm(48, 192),
             nn.GELU()
         )
         
         # Final refinement
         self.final_refine = nn.Sequential(
-            ResidualDenseBlock(256),
-            nn.Conv3d(256, 128, 3, padding=1),
+            ResidualDenseBlock(192, growth_rate=24),  # Updated to 192
+            nn.Conv3d(192, 128, 3, padding=1),
             nn.GroupNorm(32, 128),
             nn.GELU(),
             nn.Conv3d(128, 64, 3, padding=1),
@@ -448,15 +451,25 @@ class Direct256Model_H200(nn.Module):
         # Expand initial volume
         x = self.initial_volume.expand(B, -1, -1, -1, -1)
         
-        # Encoder path with X-ray fusion
-        x_64 = self.enc_32_64(x)  # (B, 64, 64, 64, 64)
-        x_64_fused = self.xray_fusion_64(torch.cat([x_64, xray_feat_64_3d], dim=1))
-        
-        x_128 = self.enc_64_128(x_64_fused)  # (B, 128, 128, 128, 128)
-        x_128_fused = self.xray_fusion_128(torch.cat([x_128, xray_feat_128_3d], dim=1))
-        
-        x_256 = self.enc_128_256(x_128_fused)  # (B, 256, 256, 256, 256)
-        x_256_fused = self.xray_fusion_256(torch.cat([x_256, xray_feat_256_3d], dim=1))
+        # Encoder path with X-ray fusion (with gradient checkpointing)
+        if self.use_checkpoint and self.training:
+            x_64 = checkpoint(self.enc_32_64, x, use_reentrant=False)
+            x_64_fused = checkpoint(self.xray_fusion_64, torch.cat([x_64, xray_feat_64_3d], dim=1), use_reentrant=False)
+            
+            x_128 = checkpoint(self.enc_64_128, x_64_fused, use_reentrant=False)
+            x_128_fused = checkpoint(self.xray_fusion_128, torch.cat([x_128, xray_feat_128_3d], dim=1), use_reentrant=False)
+            
+            x_256 = checkpoint(self.enc_128_256, x_128_fused, use_reentrant=False)
+            x_256_fused = checkpoint(self.xray_fusion_256, torch.cat([x_256, xray_feat_256_3d], dim=1), use_reentrant=False)
+        else:
+            x_64 = self.enc_32_64(x)  # (B, 64, 64, 64, 64)
+            x_64_fused = self.xray_fusion_64(torch.cat([x_64, xray_feat_64_3d], dim=1))
+            
+            x_128 = self.enc_64_128(x_64_fused)  # (B, 128, 128, 128, 128)
+            x_128_fused = self.xray_fusion_128(torch.cat([x_128, xray_feat_128_3d], dim=1))
+            
+            x_256 = self.enc_128_256(x_128_fused)  # (B, 192, 256, 256, 256)
+            x_256_fused = self.xray_fusion_256(torch.cat([x_256, xray_feat_256_3d], dim=1))
         
         # Multi-scale skip connections: bring 64³ and 128³ features to 256³
         skip_64 = self.skip_proj_64_to_256(x_64_fused)  # (B, 64, 256, 256, 256)
@@ -465,7 +478,7 @@ class Direct256Model_H200(nn.Module):
         # Fuse all scales (preserves fine details from lower resolutions)
         x_256_multiscale = self.multiscale_fusion(
             torch.cat([x_256_fused, skip_128, skip_64], dim=1)
-        )  # (B, 256, 256, 256, 256)
+        )  # (B, 192, 256, 256, 256)
         
         # Final refinement with multi-scale features
         volume_256 = self.final_refine(x_256_multiscale)
