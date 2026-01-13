@@ -52,6 +52,11 @@ def load_checkpoint(checkpoint_path, device):
         epoch = checkpoint.get('epoch', 'N/A')
         val_psnr = checkpoint.get('val_psnr', 'N/A')
         val_ssim = checkpoint.get('val_ssim', 'N/A')
+    elif 'model_state' in checkpoint:
+        model.load_state_dict(checkpoint['model_state'])
+        epoch = checkpoint.get('epoch', 'N/A')
+        val_psnr = checkpoint.get('val_psnr', 'N/A')
+        val_ssim = checkpoint.get('val_ssim', 'N/A')
     elif 'model' in checkpoint:
         model.load_state_dict(checkpoint['model'])
         epoch = checkpoint.get('epoch', 'N/A')
