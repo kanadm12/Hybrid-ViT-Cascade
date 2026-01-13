@@ -215,6 +215,7 @@ def main():
     
     # Loss with ALL 7 components re-enabled
     criterion = Direct256Loss()
+    criterion = criterion.to(device)  # Move loss modules to GPU
     print("\n✓ Re-enabled ALL 7 loss components:")
     print("  1. L1 Loss (1.0)")
     print("  2. SSIM Loss (0.5)")
