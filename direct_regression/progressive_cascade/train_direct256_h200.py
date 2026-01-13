@@ -10,6 +10,7 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from dataset_simple import PatientDRRDataset
 from model_direct128_h200 import Direct128Model_H200  # Use 128³ version
@@ -67,8 +68,9 @@ def train_one_epoch(model, criterion, optimizer, scaler, loader, device, epoch):
     num_batches = 0
 
     start_time = time.time()
-
-    for batch in loader:
+    
+    pbar = tqdm(loader, desc=f"Epoch {epoch} [Train]", leave=False)
+    for batch in pbar:
         ct_volume = batch["ct_volume"].to(device, non_blocking=True)        # (B, 1, D, H, W)
         drr_stacked = batch["drr_stacked"].to(device, non_blocking=True)    # (B, 2, 1, H, W)
 
@@ -89,6 +91,13 @@ def train_one_epoch(model, criterion, optimizer, scaler, loader, device, epoch):
             running_psnr += compute_psnr(pred.detach(), ct_volume.detach())
             running_ssim += compute_ssim_metric(pred.detach(), ct_volume.detach())
             num_batches += 1
+            
+            # Update progress bar
+            pbar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'psnr': f'{running_psnr/num_batches:.2f}',
+                'ssim': f'{running_ssim/num_batches:.4f}'
+            })
 
     epoch_time = time.time() - start_time
 
@@ -108,7 +117,8 @@ def eval_one_epoch(model, criterion, loader, device):
     num_batches = 0
 
     with torch.no_grad():
-        for batch in loader:
+        pbar = tqdm(loader, desc="Validation", leave=False)
+        for batch in pbar:
             ct_volume = batch["ct_volume"].to(device, non_blocking=True)
             drr_stacked = batch["drr_stacked"].to(device, non_blocking=True)
 
@@ -121,6 +131,13 @@ def eval_one_epoch(model, criterion, loader, device):
             running_psnr += compute_psnr(pred.detach(), ct_volume.detach())
             running_ssim += compute_ssim_metric(pred.detach(), ct_volume.detach())
             num_batches += 1
+            
+            # Update progress bar
+            pbar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'psnr': f'{running_psnr/num_batches:.2f}',
+                'ssim': f'{running_ssim/num_batches:.4f}'
+            })
 
     return {
         "loss": running_loss / max(num_batches, 1),
@@ -184,7 +201,7 @@ def main():
         log_f.write("epoch,phase,loss,psnr,ssim,lr,time\n")
 
     for epoch in range(1, args.num_epochs + 1):
-        print(f"Epoch {epoch}/{args.num_epochs}")
+        print(f"\nEpoch {epoch}/{args.num_epochs}")
 
         if scaler is None:
             # Fallback without AMP (CPU training, mostly for debugging)
@@ -193,10 +210,10 @@ def main():
             scaler_local = scaler
 
         train_stats = train_one_epoch(model, criterion, optimizer, scaler_local, train_loader, device, epoch)
-        scheduler.step()
-
         val_stats = eval_one_epoch(model, criterion, val_loader, device)
-
+        
+        # Step scheduler after optimizer step
+        scheduler.step()
         lr_current = optimizer.param_groups[0]["lr"]
 
         print(f"  Train - loss: {train_stats['loss']:.4f}, PSNR: {train_stats['psnr']:.2f}, SSIM: {train_stats['ssim']:.4f}, time: {train_stats['time']:.1f}s")

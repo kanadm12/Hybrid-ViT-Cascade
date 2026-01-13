@@ -81,15 +81,19 @@ class FocalFrequencyLoss(nn.Module):
         self.patch_factor = patch_factor
         
     def forward(self, pred, target):
-        pred_fft = torch.fft.fftn(pred, dim=(-3, -2, -1))
-        target_fft = torch.fft.fftn(target, dim=(-3, -2, -1))
-        pred_mag = torch.abs(pred_fft)
-        target_mag = torch.abs(target_fft)
-        freq_distance = (pred_mag - target_mag) ** 2
-        matrix_norm = torch.sum(freq_distance, dim=(-3, -2, -1), keepdim=True)
-        focal_weight = torch.pow(freq_distance / (matrix_norm + 1e-8), self.alpha)
-        loss = torch.mean(focal_weight * freq_distance)
-        return loss
+        # Disable autocast for FFT to avoid ComplexHalf issues
+        with torch.cuda.amp.autocast(enabled=False):
+            pred = pred.float()
+            target = target.float()
+            pred_fft = torch.fft.fftn(pred, dim=(-3, -2, -1))
+            target_fft = torch.fft.fftn(target, dim=(-3, -2, -1))
+            pred_mag = torch.abs(pred_fft)
+            target_mag = torch.abs(target_fft)
+            freq_distance = (pred_mag - target_mag) ** 2
+            matrix_norm = torch.sum(freq_distance, dim=(-3, -2, -1), keepdim=True)
+            focal_weight = torch.pow(freq_distance / (matrix_norm + 1e-8), self.alpha)
+            loss = torch.mean(focal_weight * freq_distance)
+            return loss
 
 
 class PerceptualFeaturePyramidLoss(nn.Module):
