@@ -156,30 +156,36 @@ class TotalVariationLoss(nn.Module):
         Returns:
             tv_loss: scalar
         """
+        # Ensure float32
+        pred_volume = pred_volume.float()
+        
         # Compute differences along each dimension
         diff_d = torch.abs(pred_volume[:, :, 1:, :, :] - pred_volume[:, :, :-1, :, :])
         diff_h = torch.abs(pred_volume[:, :, :, 1:, :] - pred_volume[:, :, :, :-1, :])
         diff_w = torch.abs(pred_volume[:, :, :, :, 1:] - pred_volume[:, :, :, :, :-1])
         
         # TV loss with epsilon for stability
-        tv_pred = torch.sqrt(diff_d.pow(2) + self.eps).mean() + \
-                  torch.sqrt(diff_h.pow(2) + self.eps).mean() + \
-                  torch.sqrt(diff_w.pow(2) + self.eps).mean()
+        tv_pred = (torch.sqrt(diff_d.pow(2) + self.eps).mean() + 
+                  torch.sqrt(diff_h.pow(2) + self.eps).mean() + 
+                  torch.sqrt(diff_w.pow(2) + self.eps).mean()) / 3
         
-        # If target provided, match its TV characteristics
+        # Clamp to prevent NaN
+        tv_pred = torch.clamp(tv_pred, 0, 100)
+        
         if target_volume is not None:
+            target_volume = target_volume.float()
             diff_d_t = torch.abs(target_volume[:, :, 1:, :, :] - target_volume[:, :, :-1, :, :])
             diff_h_t = torch.abs(target_volume[:, :, :, 1:, :] - target_volume[:, :, :, :-1, :])
             diff_w_t = torch.abs(target_volume[:, :, :, :, 1:] - target_volume[:, :, :, :, :-1])
             
-            tv_target = torch.sqrt(diff_d_t.pow(2) + self.eps).mean() + \
-                       torch.sqrt(diff_h_t.pow(2) + self.eps).mean() + \
-                       torch.sqrt(diff_w_t.pow(2) + self.eps).mean()
+            tv_target = (torch.sqrt(diff_d_t.pow(2) + self.eps).mean() + 
+                       torch.sqrt(diff_h_t.pow(2) + self.eps).mean() + 
+                       torch.sqrt(diff_w_t.pow(2) + self.eps).mean()) / 3
             
-            # Encourage pred TV to match target TV (preserves edge sharpness)
+            tv_target = torch.clamp(tv_target, 0, 100)
             return F.l1_loss(tv_pred, tv_target)
         
-        return tv_pred / 3  # Average over 3 dimensions
+        return tv_pred
 
 
 class FrequencyLoss(nn.Module):

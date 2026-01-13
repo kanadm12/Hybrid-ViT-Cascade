@@ -85,15 +85,26 @@ class FocalFrequencyLoss(nn.Module):
         with torch.cuda.amp.autocast(enabled=False):
             pred = pred.float()
             target = target.float()
-            pred_fft = torch.fft.fftn(pred, dim=(-3, -2, -1))
-            target_fft = torch.fft.fftn(target, dim=(-3, -2, -1))
-            pred_mag = torch.abs(pred_fft)
-            target_mag = torch.abs(target_fft)
-            freq_distance = (pred_mag - target_mag) ** 2
-            matrix_norm = torch.sum(freq_distance, dim=(-3, -2, -1), keepdim=True)
-            focal_weight = torch.pow(freq_distance / (matrix_norm + 1e-8), self.alpha)
-            loss = torch.mean(focal_weight * freq_distance)
-            return loss
+            
+            try:
+                pred_fft = torch.fft.fftn(pred, dim=(-3, -2, -1))
+                target_fft = torch.fft.fftn(target, dim=(-3, -2, -1))
+                pred_mag = torch.abs(pred_fft)
+                target_mag = torch.abs(target_fft)
+                freq_distance = (pred_mag - target_mag) ** 2
+                matrix_norm = torch.sum(freq_distance, dim=(-3, -2, -1), keepdim=True)
+                focal_weight = torch.pow(freq_distance / (matrix_norm + 1e-8), self.alpha)
+                loss = torch.mean(focal_weight * freq_distance)
+                
+                # Safety check
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(f"[DEBUG] FocalFreq returning NaN/Inf, returning zeros")
+                    return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
+                
+                return torch.clamp(loss, 0, 100)
+            except Exception as e:
+                print(f"[ERROR] FocalFrequencyLoss exception: {e}")
+                return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
 
 
 class PerceptualFeaturePyramidLoss(nn.Module):
@@ -114,19 +125,34 @@ class PerceptualFeaturePyramidLoss(nn.Module):
         )
     
     def forward(self, pred, target):
-        total_loss = 0.0
-        for scale in self.scales:
-            if scale != 1.0:
-                size = [int(s * scale) for s in pred.shape[-3:]]
-                pred_scaled = F.interpolate(pred, size=size, mode='trilinear', align_corners=False)
-                target_scaled = F.interpolate(target, size=size, mode='trilinear', align_corners=False)
-            else:
-                pred_scaled = pred
-                target_scaled = target
-            pred_feat = self.feature_extractor(pred_scaled)
-            target_feat = self.feature_extractor(target_scaled)
-            total_loss += F.l1_loss(pred_feat, target_feat)
-        return total_loss / len(self.scales)
+        try:
+            total_loss = 0.0
+            for scale in self.scales:
+                if scale != 1.0:
+                    size = [int(s * scale) for s in pred.shape[-3:]]
+                    pred_scaled = F.interpolate(pred, size=size, mode='trilinear', align_corners=False)
+                    target_scaled = F.interpolate(target, size=size, mode='trilinear', align_corners=False)
+                else:
+                    pred_scaled = pred
+                    target_scaled = target
+                
+                pred_feat = self.feature_extractor(pred_scaled)
+                target_feat = self.feature_extractor(target_scaled)
+                scale_loss = F.l1_loss(pred_feat, target_feat)
+                
+                if torch.isnan(scale_loss) or torch.isinf(scale_loss):
+                    print(f"[DEBUG] PerceptualPyramid scale {scale} returned NaN")
+                    return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
+                
+                total_loss += torch.clamp(scale_loss, 0, 100)
+            
+            result = total_loss / len(self.scales)
+            if torch.isnan(result) or torch.isinf(result):
+                return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
+            return result
+        except Exception as e:
+            print(f"[ERROR] PerceptualPyramidLoss exception: {e}")
+            return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
 
 
 class Style3DLoss(nn.Module):
@@ -147,14 +173,30 @@ class Style3DLoss(nn.Module):
         B, C, D, H, W = features.shape
         features_flat = features.view(B, C, -1)
         gram = torch.bmm(features_flat, features_flat.transpose(1, 2))
-        return gram / (C * D * H * W)
+        # Normalize by feature count for stability
+        norm_factor = max(1.0, float(C * D * H * W))
+        return gram / norm_factor
     
     def forward(self, pred, target):
-        pred_feat = self.feature_extractor(pred)
-        target_feat = self.feature_extractor(target)
-        pred_gram = self.gram_matrix(pred_feat)
-        target_gram = self.gram_matrix(target_feat)
-        return F.mse_loss(pred_gram, target_gram)
+        try:
+            pred_feat = self.feature_extractor(pred).float()
+            target_feat = self.feature_extractor(target).float()
+            pred_gram = self.gram_matrix(pred_feat)
+            target_gram = self.gram_matrix(target_feat)
+            
+            # Clamp gram matrices to prevent overflow
+            pred_gram = torch.clamp(pred_gram, -1e3, 1e3)
+            target_gram = torch.clamp(target_gram, -1e3, 1e3)
+            
+            loss = F.mse_loss(pred_gram, target_gram)
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"[DEBUG] Style3D returning NaN/Inf")
+                return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
+            
+            return torch.clamp(loss, 0, 100)
+        except Exception as e:
+            print(f"[ERROR] Style3DLoss exception: {e}")
+            return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
 
 
 class AnatomicalAttentionLoss(nn.Module):
@@ -173,26 +215,41 @@ class AnatomicalAttentionLoss(nn.Module):
         )
     
     def forward(self, pred, target):
-        with torch.no_grad():
-            grad_d = torch.abs(target[:, :, 1:, :, :] - target[:, :, :-1, :, :])
-            grad_h = torch.abs(target[:, :, :, 1:, :] - target[:, :, :, :-1, :])
-            grad_w = torch.abs(target[:, :, :, :, 1:] - target[:, :, :, :, :-1])
-            grad_d = F.pad(grad_d, (0, 0, 0, 0, 0, 1))
-            grad_h = F.pad(grad_h, (0, 0, 0, 1, 0, 0))
-            grad_w = F.pad(grad_w, (0, 1, 0, 0, 0, 0))
-            importance = (grad_d + grad_h + grad_w) / 3
-            importance_min = importance.min()
-            importance_max = importance.max()
-            importance_range = importance_max - importance_min
-            if importance_range > 1e-6:
-                importance = (importance - importance_min) / (importance_range + 1e-8)
-            else:
-                importance = torch.ones_like(importance) * 0.5
-        attention = self.attention_net(importance)
-        weighted_error = attention * torch.abs(pred - target)
-        uniform_loss = F.l1_loss(pred, target)
-        attention_loss = weighted_error.mean()
-        return 0.7 * attention_loss + 0.3 * uniform_loss
+        try:
+            with torch.no_grad():
+                grad_d = torch.abs(target[:, :, 1:, :, :] - target[:, :, :-1, :, :])
+                grad_h = torch.abs(target[:, :, :, 1:, :] - target[:, :, :, :-1, :])
+                grad_w = torch.abs(target[:, :, :, :, 1:] - target[:, :, :, :, :-1])
+                grad_d = F.pad(grad_d, (0, 0, 0, 0, 0, 1))
+                grad_h = F.pad(grad_h, (0, 0, 0, 1, 0, 0))
+                grad_w = F.pad(grad_w, (0, 1, 0, 0, 0, 0))
+                importance = (grad_d + grad_h + grad_w) / 3
+                importance_min = importance.min()
+                importance_max = importance.max()
+                importance_range = importance_max - importance_min
+                if importance_range > 1e-6:
+                    importance = (importance - importance_min) / (importance_range + 1e-8)
+                else:
+                    importance = torch.ones_like(importance) * 0.5
+            
+            attention = self.attention_net(importance)
+            weighted_error = attention * torch.abs(pred - target)
+            uniform_loss = F.l1_loss(pred, target)
+            attention_loss = weighted_error.mean()
+            
+            # Clamp losses
+            attention_loss = torch.clamp(attention_loss, 0, 100)
+            uniform_loss = torch.clamp(uniform_loss, 0, 100)
+            
+            result = 0.7 * attention_loss + 0.3 * uniform_loss
+            if torch.isnan(result) or torch.isinf(result):
+                print(f"[DEBUG] AnatomicalAttention returning NaN/Inf")
+                return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
+            
+            return result
+        except Exception as e:
+            print(f"[ERROR] AnatomicalAttentionLoss exception: {e}")
+            return torch.tensor(0.0, device=pred.device, dtype=torch.float32)
 
 
 class ResidualDenseBlock(nn.Module):

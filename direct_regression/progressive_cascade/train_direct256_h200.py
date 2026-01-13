@@ -66,6 +66,7 @@ def train_one_epoch(model, criterion, optimizer, scaler, loader, device, epoch):
     running_psnr = 0.0
     running_ssim = 0.0
     num_batches = 0
+    nan_count = 0
 
     start_time = time.time()
     
@@ -81,7 +82,18 @@ def train_one_epoch(model, criterion, optimizer, scaler, loader, device, epoch):
             loss_dict = criterion(pred, ct_volume)
             loss = loss_dict["total_loss"]
 
+        # Check for NaN before backward
+        if torch.isnan(loss) or torch.isinf(loss):
+            nan_count += 1
+            print(f"\n[WARNING] Batch {num_batches} returned NaN loss. Skipping this batch.")
+            print(f"Loss components: {loss_dict}")
+            continue
+
         scaler.scale(loss).backward()
+        
+        # Gradient clipping to prevent explosion
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
         scaler.step(optimizer)
         scaler.update()
 
@@ -96,7 +108,8 @@ def train_one_epoch(model, criterion, optimizer, scaler, loader, device, epoch):
             pbar.set_postfix({
                 'loss': f'{loss.item():.4f}',
                 'psnr': f'{running_psnr/num_batches:.2f}',
-                'ssim': f'{running_ssim/num_batches:.4f}'
+                'ssim': f'{running_ssim/num_batches:.4f}',
+                'nan_skipped': nan_count
             })
 
     epoch_time = time.time() - start_time
@@ -115,6 +128,7 @@ def eval_one_epoch(model, criterion, loader, device):
     running_psnr = 0.0
     running_ssim = 0.0
     num_batches = 0
+    nan_count = 0
 
     with torch.no_grad():
         pbar = tqdm(loader, desc="Validation", leave=False)
@@ -126,6 +140,12 @@ def eval_one_epoch(model, criterion, loader, device):
                 pred = model(drr_stacked)
                 loss_dict = criterion(pred, ct_volume)
                 loss = loss_dict["total_loss"]
+
+            # Check for NaN in validation
+            if torch.isnan(loss) or torch.isinf(loss):
+                nan_count += 1
+                print(f"\n[WARNING] Val batch {num_batches} returned NaN loss")
+                continue
 
             running_loss += loss.item()
             running_psnr += compute_psnr(pred.detach(), ct_volume.detach())

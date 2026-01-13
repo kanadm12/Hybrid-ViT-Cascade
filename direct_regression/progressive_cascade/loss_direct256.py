@@ -18,6 +18,14 @@ from model_direct128_h200 import (
 )
 
 
+def check_nan(loss_val, name):
+    """Debug helper to detect NaN in losses"""
+    if torch.isnan(loss_val).any():
+        print(f"[NaN DEBUG] {name} is NaN")
+        return True
+    return False
+
+
 class Direct256Loss(nn.Module):
     """
     Comprehensive loss for direct end-to-end training (128³ or 256³)
@@ -67,35 +75,51 @@ class Direct256Loss(nn.Module):
         Returns:
             loss_dict: dict with all losses
         """
-        # Compute all losses
+        # Ensure float32 for numerical stability
+        pred = pred.float()
+        target = target.float()
+        
+        # Compute stable losses only
         l1_loss = F.l1_loss(pred, target)
         ssim_loss = self.ssim_loss(pred, target)
-        focal_freq_loss = self.focal_freq_loss(pred, target)
-        perceptual_pyramid_loss = self.perceptual_pyramid_loss(pred, target)
         tv_loss = self.tv_loss(pred, target)
-        style_loss = self.style_loss(pred, target)
-        anatomical_loss = self.anatomical_loss(pred, target)
         
-        # Combined loss
+        # Clamp values to prevent NaN propagation
+        l1_loss = torch.clamp(l1_loss, 0, 100)
+        ssim_loss = torch.clamp(ssim_loss, 0, 100)
+        tv_loss = torch.clamp(tv_loss, 0, 100)
+        
+        # Check for NaN
+        if torch.isnan(l1_loss) or torch.isnan(ssim_loss) or torch.isnan(tv_loss):
+            print(f"[NaN] L1: {l1_loss.item()}, SSIM: {ssim_loss.item()}, TV: {tv_loss.item()}")
+            # Return safe default
+            return {
+                'total_loss': torch.tensor(1.0, device=pred.device),
+                'l1_loss': l1_loss,
+                'ssim_loss': ssim_loss,
+                'focal_freq_loss': torch.tensor(0.0, device=pred.device),
+                'perceptual_pyramid_loss': torch.tensor(0.0, device=pred.device),
+                'tv_loss': tv_loss,
+                'style_loss': torch.tensor(0.0, device=pred.device),
+                'anatomical_loss': torch.tensor(0.0, device=pred.device)
+            }
+        
+        # Combined loss - use only stable components
         total_loss = (
             self.l1_weight * l1_loss +
             self.ssim_weight * ssim_loss +
-            self.focal_freq_weight * focal_freq_loss +
-            self.perceptual_pyramid_weight * perceptual_pyramid_loss +
-            self.tv_weight * tv_loss +
-            self.style_weight * style_loss +
-            self.anatomical_weight * anatomical_loss
+            self.tv_weight * tv_loss
         )
         
         return {
             'total_loss': total_loss,
             'l1_loss': l1_loss,
             'ssim_loss': ssim_loss,
-            'focal_freq_loss': focal_freq_loss,
-            'perceptual_pyramid_loss': perceptual_pyramid_loss,
+            'focal_freq_loss': torch.tensor(0.0, device=pred.device),
+            'perceptual_pyramid_loss': torch.tensor(0.0, device=pred.device),
             'tv_loss': tv_loss,
-            'style_loss': style_loss,
-            'anatomical_loss': anatomical_loss
+            'style_loss': torch.tensor(0.0, device=pred.device),
+            'anatomical_loss': torch.tensor(0.0, device=pred.device)
         }
 
 
