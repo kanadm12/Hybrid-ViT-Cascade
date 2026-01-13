@@ -1,13 +1,16 @@
 """
-Advanced Loss Suite for Direct 256³ H200 Training
+Advanced Loss Suite for Direct H200 Training (128³ or 256³)
 Combines 7 complementary loss functions for maximum perceptual quality
+Resolution-agnostic: works with any volume size
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from loss_multiscale import SSIMLoss, TotalVariationLoss, compute_psnr, compute_ssim_metric
-from model_direct256_h200 import (
+
+# Import from Direct128 model (works for both 128³ and 256³)
+from model_direct128_h200 import (
     FocalFrequencyLoss,
     PerceptualFeaturePyramidLoss,
     Style3DLoss,
@@ -17,7 +20,8 @@ from model_direct256_h200 import (
 
 class Direct256Loss(nn.Module):
     """
-    Comprehensive loss for direct 256³ training
+    Comprehensive loss for direct end-to-end training (128³ or 256³)
+    Resolution-agnostic: adapts to any input volume size
     
     7 Loss Components:
     1. L1 (1.0): Base reconstruction
@@ -59,7 +63,7 @@ class Direct256Loss(nn.Module):
     def forward(self, pred, target):
         """
         Args:
-            pred, target: (B, 1, 256, 256, 256)
+            pred, target: (B, 1, D, H, W) - any resolution (128³, 256³, etc.)
         Returns:
             loss_dict: dict with all losses
         """

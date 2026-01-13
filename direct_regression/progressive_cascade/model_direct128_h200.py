@@ -73,6 +73,155 @@ class ResidualDenseBlock(nn.Module):
         return x + compressed
 
 
+class FocalFrequencyLoss(nn.Module):
+    """Focal Frequency Loss - emphasizes clinically important frequencies"""
+    def __init__(self, alpha=1.0, patch_factor=1):
+        super().__init__()
+        self.alpha = alpha
+        self.patch_factor = patch_factor
+        
+    def forward(self, pred, target):
+        pred_fft = torch.fft.fftn(pred, dim=(-3, -2, -1))
+        target_fft = torch.fft.fftn(target, dim=(-3, -2, -1))
+        pred_mag = torch.abs(pred_fft)
+        target_mag = torch.abs(target_fft)
+        freq_distance = (pred_mag - target_mag) ** 2
+        matrix_norm = torch.sum(freq_distance, dim=(-3, -2, -1), keepdim=True)
+        focal_weight = torch.pow(freq_distance / (matrix_norm + 1e-8), self.alpha)
+        loss = torch.mean(focal_weight * freq_distance)
+        return loss
+
+
+class PerceptualFeaturePyramidLoss(nn.Module):
+    """Multi-scale perceptual loss using feature pyramid"""
+    def __init__(self, scales=[1.0, 0.5, 0.25]):
+        super().__init__()
+        self.scales = scales
+        self.feature_extractor = nn.Sequential(
+            nn.Conv3d(1, 32, 3, padding=1),
+            nn.GroupNorm(8, 32),
+            nn.GELU(),
+            nn.Conv3d(32, 64, 3, padding=1),
+            nn.GroupNorm(16, 64),
+            nn.GELU(),
+            nn.Conv3d(64, 128, 3, padding=1),
+            nn.GroupNorm(32, 128),
+            nn.GELU()
+        )
+    
+    def forward(self, pred, target):
+        total_loss = 0.0
+        for scale in self.scales:
+            if scale != 1.0:
+                size = [int(s * scale) for s in pred.shape[-3:]]
+                pred_scaled = F.interpolate(pred, size=size, mode='trilinear', align_corners=False)
+                target_scaled = F.interpolate(target, size=size, mode='trilinear', align_corners=False)
+            else:
+                pred_scaled = pred
+                target_scaled = target
+            pred_feat = self.feature_extractor(pred_scaled)
+            target_feat = self.feature_extractor(target_scaled)
+            total_loss += F.l1_loss(pred_feat, target_feat)
+        return total_loss / len(self.scales)
+
+
+class Style3DLoss(nn.Module):
+    """3D Style Loss - ensures texture consistency across volume"""
+    def __init__(self):
+        super().__init__()
+        self.feature_extractor = nn.Sequential(
+            nn.Conv3d(1, 32, 3, padding=1),
+            nn.GroupNorm(8, 32),
+            nn.GELU(),
+            nn.Conv3d(32, 64, 3, padding=1),
+            nn.GroupNorm(16, 64),
+            nn.GELU(),
+            nn.Conv3d(64, 64, 3, padding=1)
+        )
+    
+    def gram_matrix(self, features):
+        B, C, D, H, W = features.shape
+        features_flat = features.view(B, C, -1)
+        gram = torch.bmm(features_flat, features_flat.transpose(1, 2))
+        return gram / (C * D * H * W)
+    
+    def forward(self, pred, target):
+        pred_feat = self.feature_extractor(pred)
+        target_feat = self.feature_extractor(target)
+        pred_gram = self.gram_matrix(pred_feat)
+        target_gram = self.gram_matrix(target_feat)
+        return F.mse_loss(pred_gram, target_gram)
+
+
+class AnatomicalAttentionLoss(nn.Module):
+    """Attention-weighted reconstruction loss"""
+    def __init__(self):
+        super().__init__()
+        self.attention_net = nn.Sequential(
+            nn.Conv3d(1, 16, 3, padding=1),
+            nn.GroupNorm(4, 16),
+            nn.GELU(),
+            nn.Conv3d(16, 32, 3, padding=1),
+            nn.GroupNorm(8, 32),
+            nn.GELU(),
+            nn.Conv3d(32, 1, 1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, pred, target):
+        with torch.no_grad():
+            grad_d = torch.abs(target[:, :, 1:, :, :] - target[:, :, :-1, :, :])
+            grad_h = torch.abs(target[:, :, :, 1:, :] - target[:, :, :, :-1, :])
+            grad_w = torch.abs(target[:, :, :, :, 1:] - target[:, :, :, :, :-1])
+            grad_d = F.pad(grad_d, (0, 0, 0, 0, 0, 1))
+            grad_h = F.pad(grad_h, (0, 0, 0, 1, 0, 0))
+            grad_w = F.pad(grad_w, (0, 1, 0, 0, 0, 0))
+            importance = (grad_d + grad_h + grad_w) / 3
+            importance_min = importance.min()
+            importance_max = importance.max()
+            importance_range = importance_max - importance_min
+            if importance_range > 1e-6:
+                importance = (importance - importance_min) / (importance_range + 1e-8)
+            else:
+                importance = torch.ones_like(importance) * 0.5
+        attention = self.attention_net(importance)
+        weighted_error = attention * torch.abs(pred - target)
+        uniform_loss = F.l1_loss(pred, target)
+        attention_loss = weighted_error.mean()
+        return 0.7 * attention_loss + 0.3 * uniform_loss
+
+
+class ResidualDenseBlock(nn.Module):
+    """Residual Dense Block for better feature reuse"""
+    def __init__(self, in_channels, growth_rate=32, num_layers=4):
+        super().__init__()
+        self.layers = nn.ModuleList()
+        
+        for i in range(num_layers):
+            layer_channels = in_channels + i * growth_rate
+            num_groups = min(8, growth_rate)
+            while growth_rate % num_groups != 0:
+                num_groups -= 1
+            
+            self.layers.append(nn.Sequential(
+                nn.Conv3d(layer_channels, growth_rate, 3, padding=1),
+                nn.GroupNorm(num_groups, growth_rate),
+                nn.GELU()
+            ))
+        
+        self.compress = nn.Conv3d(in_channels + num_layers * growth_rate, in_channels, 1)
+    
+    def forward(self, x):
+        features = [x]
+        for layer in self.layers:
+            feat = torch.cat(features, dim=1)
+            out = layer(feat)
+            features.append(out)
+        all_features = torch.cat(features, dim=1)
+        compressed = self.compress(all_features)
+        return x + compressed
+
+
 class Direct128Model_H200(nn.Module):
     """
     Direct 128³ End-to-End Model for H200
