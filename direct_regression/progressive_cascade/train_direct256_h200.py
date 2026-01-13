@@ -12,19 +12,19 @@ import torch
 from torch.utils.data import DataLoader
 
 from dataset_simple import PatientDRRDataset
-from model_direct256_h200 import Direct256Model_H200
+from model_direct128_h200 import Direct128Model_H200  # Use 128³ version
 from loss_direct256 import Direct256Loss, get_loss_summary_string
 from loss_multiscale import compute_psnr, compute_ssim_metric
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train Direct 256^3 H200 model")
+    parser = argparse.ArgumentParser(description="Train Direct 128^3 H200 model")
     parser.add_argument("--dataset_path", type=str, required=True,
                         help="Path to DRR patient dataset root")
-    parser.add_argument("--save_dir", type=str, default="checkpoints_direct256_h200",
+    parser.add_argument("--save_dir", type=str, default="checkpoints_direct128_h200",
                         help="Directory to save checkpoints and logs")
-    parser.add_argument("--batch_size", type=int, default=1,
-                        help="Batch size (H200: 1 recommended for 256^3)")
+    parser.add_argument("--batch_size", type=int, default=2,
+                        help="Batch size (H200: 2-4 recommended for 128^3)")
     parser.add_argument("--num_epochs", type=int, default=180,
                         help="Number of training epochs (150-200 recommended)")
     parser.add_argument("--lr", type=float, default=1e-4,
@@ -42,7 +42,7 @@ def create_datasets(args):
         dataset_path=args.dataset_path,
         max_patients=args.max_patients,
         split="train",
-        ct_size=256,
+        ct_size=128,  # 128³ resolution
         drr_size=512,
         vertical_flip=True,  # CRITICAL: ensure DRRs are flipped vertically
     )
@@ -51,7 +51,7 @@ def create_datasets(args):
         dataset_path=args.dataset_path,
         max_patients=args.max_patients,
         split="val",
-        ct_size=256,
+        ct_size=128,  # 128³ resolution
         drr_size=512,
         vertical_flip=True,  # keep same orientation in validation
     )
@@ -163,7 +163,7 @@ def main():
     )
 
     print("Initializing model and loss...")
-    model = Direct256Model_H200().to(device)
+    model = Direct128Model_H200().to(device)  # Use 128³ model
     criterion = Direct256Loss().to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -215,7 +215,7 @@ def main():
         
         if is_best_loss:
             best_val_loss = val_stats["loss"]
-            ckpt_path = save_dir / "direct256_best_loss.pth"
+            ckpt_path = save_dir / "direct128_best_loss.pth"
             torch.save(
                 {
                     "epoch": epoch,
@@ -233,7 +233,7 @@ def main():
         
         if is_best_psnr:
             best_psnr = val_stats["psnr"]
-            ckpt_path = save_dir / "direct256_best_psnr.pth"
+            ckpt_path = save_dir / "direct128_best_psnr.pth"
             torch.save(
                 {
                     "epoch": epoch,
@@ -251,7 +251,7 @@ def main():
         
         if is_best_ssim:
             best_ssim = val_stats["ssim"]
-            ckpt_path = save_dir / "direct256_best_ssim.pth"
+            ckpt_path = save_dir / "direct128_best_ssim.pth"
             torch.save(
                 {
                     "epoch": epoch,
