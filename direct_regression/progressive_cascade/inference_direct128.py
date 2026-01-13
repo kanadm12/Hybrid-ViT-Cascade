@@ -97,13 +97,14 @@ def load_patient_data(dataset_path, patient_id, split="val"):
         # Random patient
         idx = random.randint(0, len(dataset) - 1)
         sample = dataset[idx]
-        patient_id = dataset.patients[idx]
+        patient_id = dataset.patient_dirs[idx].name
         print(f"Random patient selected: {patient_id}")
     else:
-        # Specific patient
-        if patient_id not in dataset.patients:
-            raise ValueError(f"Patient {patient_id} not found in dataset")
-        idx = dataset.patients.index(patient_id)
+        # Specific patient - find index
+        patient_names = [p.name for p in dataset.patient_dirs]
+        if patient_id not in patient_names:
+            raise ValueError(f"Patient {patient_id} not found in {split} dataset")
+        idx = patient_names.index(patient_id)
         sample = dataset[idx]
         print(f"Using specified patient: {patient_id}")
     
