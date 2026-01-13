@@ -208,28 +208,64 @@ def main():
             log_f.write(f"{epoch},train,{train_stats['loss']:.6f},{train_stats['psnr']:.3f},{train_stats['ssim']:.5f},{lr_current:.8f},{train_stats['time']:.3f}\n")
             log_f.write(f"{epoch},val,{val_stats['loss']:.6f},{val_stats['psnr']:.3f},{val_stats['ssim']:.5f},{lr_current:.8f},0.000\n")
 
-        # Save best checkpoint by validation loss
-        is_best = val_stats["loss"] < best_val_loss
-        if is_best:
+        # Save best checkpoints for loss, PSNR, and SSIM separately
+        is_best_loss = val_stats["loss"] < best_val_loss
+        is_best_psnr = val_stats["psnr"] > best_psnr
+        is_best_ssim = val_stats["ssim"] > best_ssim
+        
+        if is_best_loss:
             best_val_loss = val_stats["loss"]
-            best_psnr = val_stats["psnr"]
-            best_ssim = val_stats["ssim"]
-
-            ckpt_path = save_dir / "direct256_best.pth"
+            ckpt_path = save_dir / "direct256_best_loss.pth"
             torch.save(
                 {
                     "epoch": epoch,
                     "model_state": model.state_dict(),
                     "optimizer_state": optimizer.state_dict(),
                     "scheduler_state": scheduler.state_dict(),
-                    "best_val_loss": best_val_loss,
-                    "best_psnr": best_psnr,
-                    "best_ssim": best_ssim,
+                    "val_loss": val_stats["loss"],
+                    "val_psnr": val_stats["psnr"],
+                    "val_ssim": val_stats["ssim"],
                     "args": vars(args),
                 },
                 ckpt_path,
             )
-            print(f"  ✓ Saved new best checkpoint to {ckpt_path}")
+            print(f"  ✓ Saved best loss checkpoint: {val_stats['loss']:.4f}")
+        
+        if is_best_psnr:
+            best_psnr = val_stats["psnr"]
+            ckpt_path = save_dir / "direct256_best_psnr.pth"
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "scheduler_state": scheduler.state_dict(),
+                    "val_loss": val_stats["loss"],
+                    "val_psnr": val_stats["psnr"],
+                    "val_ssim": val_stats["ssim"],
+                    "args": vars(args),
+                },
+                ckpt_path,
+            )
+            print(f"  ✓ Saved best PSNR checkpoint: {val_stats['psnr']:.2f} dB")
+        
+        if is_best_ssim:
+            best_ssim = val_stats["ssim"]
+            ckpt_path = save_dir / "direct256_best_ssim.pth"
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "scheduler_state": scheduler.state_dict(),
+                    "val_loss": val_stats["loss"],
+                    "val_psnr": val_stats["psnr"],
+                    "val_ssim": val_stats["ssim"],
+                    "args": vars(args),
+                },
+                ckpt_path,
+            )
+            print(f"  ✓ Saved best SSIM checkpoint: {val_stats['ssim']:.4f}")
 
     print("Training finished.")
     print(f"Best validation loss: {best_val_loss:.4f}, PSNR: {best_psnr:.2f}, SSIM: {best_ssim:.4f}")
