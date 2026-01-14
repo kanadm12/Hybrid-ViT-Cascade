@@ -28,6 +28,43 @@ from torch.utils.checkpoint import checkpoint
 from model_direct128_h200 import ResidualDenseBlock
 
 
+class CBAM(nn.Module):
+    """Convolutional Block Attention Module (CBAM)
+    Combines channel and spatial attention for feature refinement.
+    Memory: ~2-3GB at 128³ resolution with 128 channels
+    """
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        # Channel attention
+        self.avg_pool = nn.AdaptiveAvgPool3d(1)
+        self.max_pool = nn.AdaptiveMaxPool3d(1)
+        self.fc = nn.Sequential(
+            nn.Conv3d(channels, channels // reduction, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(channels // reduction, channels, 1, bias=False)
+        )
+        self.sigmoid_channel = nn.Sigmoid()
+        
+        # Spatial attention
+        self.conv_spatial = nn.Conv3d(2, 1, 7, padding=3, bias=False)
+        self.sigmoid_spatial = nn.Sigmoid()
+    
+    def forward(self, x):
+        # Channel attention
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
+        channel_att = self.sigmoid_channel(avg_out + max_out)
+        x = x * channel_att
+        
+        # Spatial attention
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        spatial_att = self.sigmoid_spatial(self.conv_spatial(torch.cat([avg_out, max_out], dim=1)))
+        x = x * spatial_att
+        
+        return x
+
+
 class XRayEncoder(nn.Module):
     """Encodes 2D X-ray views - Memory optimized (128 channels)"""
     def __init__(self):
@@ -98,6 +135,11 @@ class Direct256Model_B200(nn.Module):
             ResidualDenseBlock(in_channels=128, growth_rate=16, num_layers=3),
             ResidualDenseBlock(in_channels=128, growth_rate=16, num_layers=3),
         )
+        
+        # ====== CBAM Attention at 128³ ======
+        # Applied after Stage 3 for global context refinement
+        # Memory: ~2-3GB at 128³ with 128 channels
+        self.cbam_128 = CBAM(channels=128, reduction=16)
         
         # ====== Stage 4: 128³ → 256³ (NEW - Random Init) ======
         # Memory-critical: No RDB blocks to fit in 180GB
@@ -186,6 +228,9 @@ class Direct256Model_B200(nn.Module):
         xray_128 = F.interpolate(xray_feat, size=(128, 128), mode='bilinear', align_corners=False)
         xray_128_3d = xray_128.unsqueeze(2).expand(-1, -1, 128, -1, -1)
         x = self.xray_fusion_128(torch.cat([x, xray_128_3d], dim=1))
+        
+        # Apply CBAM attention at 128³ for global context
+        x = self.cbam_128(x)
         skip_128 = x
         
         # ====== Stage 4: 128³ → 256³ ======
