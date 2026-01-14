@@ -3,7 +3,7 @@
 # Current: 27.98 dB PSNR, 0.50 SSIM at epoch 71
 # Target: Continue training to improve performance
 
-CHECKPOINT="/workspace/Hybrid-ViT-Cascade/direct_regression/progressive_cascade/checkpoints_direct128_h200_resumed/direct128_best_psnr_resumed.pth"
+CHECKPOINT="/workspace/Hybrid-ViT-Cascade/direct_regression/progressive_cascade/direct128_best_psnr_resumed.pth"
 DATASET="/workspace/drr_patient_data"
 SAVE_DIR="checkpoints_direct128_h200_continued"
 BATCH_SIZE=2
