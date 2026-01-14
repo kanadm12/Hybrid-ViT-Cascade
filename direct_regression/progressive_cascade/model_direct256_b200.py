@@ -78,16 +78,15 @@ class Direct256Model_B200(nn.Module):
         )
         
         # ====== Stage 3: 64³ → 128³ (Transferable) ======
+        # NOTE: 128³ model uses 320 channels, but incompatible with 256³ memory constraints
+        # Using 128 channels - this stage will NOT transfer from 128³ checkpoint
         self.enc_64_128 = nn.Sequential(
             nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
             nn.Conv3d(64, 128, 3, padding=1),
             nn.GroupNorm(16, 128),
             nn.ReLU(inplace=True),
-            ResidualDenseBlock(128, growth_rate=32, num_layers=4),
-            ResidualDenseBlock(128, growth_rate=32, num_layers=4),
-            ResidualDenseBlock(128, growth_rate=32, num_layers=4),
-            ResidualDenseBlock(128, growth_rate=32, num_layers=4),
-            ResidualDenseBlock(in_channels=128, growth_rate=32, num_layers=4),
+            ResidualDenseBlock(in_channels=128, growth_rate=16, num_layers=3),
+            ResidualDenseBlock(in_channels=128, growth_rate=16, num_layers=3),
         )
         
         # ====== Stage 4: 128³ → 256³ (NEW - Random Init) ======
