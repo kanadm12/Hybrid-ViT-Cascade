@@ -91,22 +91,21 @@ class Direct256Model_B200(nn.Module):
         )
         
         # ====== Stage 4: 128³ → 256³ (NEW - Random Init) ======
-        # Memory-optimized: 3 RDB blocks, growth_rate=16
+        # Ultra memory-optimized: 2 RDB blocks, 128 channels, growth_rate=8
         self.enc_128_256 = nn.Sequential(
             nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
-            nn.Conv3d(128, 160, 3, padding=1),  # Reduced from 192 to 160
-            nn.GroupNorm(16, 160),
+            nn.Conv3d(128, 128, 3, padding=1),
+            nn.GroupNorm(16, 128),
             nn.ReLU(inplace=True),
-            ResidualDenseBlock(in_channels=160, growth_rate=16, num_layers=4),
-            ResidualDenseBlock(in_channels=160, growth_rate=16, num_layers=4),
-            ResidualDenseBlock(in_channels=160, growth_rate=16, num_layers=4),
+            ResidualDenseBlock(in_channels=128, growth_rate=8, num_layers=3),
+            ResidualDenseBlock(in_channels=128, growth_rate=8, num_layers=3),
         )
         
         # X-ray fusion at multiple scales
         self.xray_fusion_32 = nn.Conv3d(32 + 512, 32, 1)
         self.xray_fusion_64 = nn.Conv3d(64 + 512, 64, 1)
         self.xray_fusion_128 = nn.Conv3d(128 + 512, 128, 1)
-        self.xray_fusion_256 = nn.Conv3d(160 + 512, 160, 1)  # Updated to 160
+        self.xray_fusion_256 = nn.Conv3d(128 + 512, 128, 1)  # Updated to 128
         
         # Skip connection projections
         self.skip_proj_32_to_256 = nn.Sequential(
@@ -124,19 +123,18 @@ class Direct256Model_B200(nn.Module):
         
         # Multi-scale fusion
         self.multiscale_fusion = nn.Sequential(
-            nn.Conv3d(160 + 64 + 64 + 64, 160, 1),  # Updated to 160
-            nn.GroupNorm(16, 160),
+            nn.Conv3d(128 + 64 + 64 + 64, 128, 1),  # Updated to 128
+            nn.GroupNorm(16, 128),
             nn.ReLU(inplace=True)
         )
         
         # Final refinement at 256³
         self.final_refine = nn.Sequential(
-            ResidualDenseBlock(in_channels=160, growth_rate=16, num_layers=4),  # Reduced
-            ResidualDenseBlock(in_channels=160, growth_rate=16, num_layers=4),  # Reduced
-            nn.Conv3d(160, 128, 3, padding=1),
-            nn.GroupNorm(16, 128),
+            ResidualDenseBlock(in_channels=128, growth_rate=8, num_layers=3),
+            nn.Conv3d(128, 96, 3, padding=1),
+            nn.GroupNorm(16, 96),
             nn.ReLU(inplace=True),
-            nn.Conv3d(128, 64, 3, padding=1),
+            nn.Conv3d(96, 64, 3, padding=1),
             nn.GroupNorm(8, 64),
             nn.ReLU(inplace=True),
             nn.Conv3d(64, 32, 3, padding=1),
