@@ -3,7 +3,7 @@
 
 set -e
 
-DATASET="/workspace/drr_patient_data_expanded"
+DATASET="/workspace/drr_patient_data"
 CHECKPOINT_128="/workspace/Hybrid-ViT-Cascade/direct_regression/progressive_cascade/direct128_best_psnr_resumed.pth"
 CHECKPOINT_DIR="checkpoints_direct256_b200"
 

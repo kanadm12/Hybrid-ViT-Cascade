@@ -3,7 +3,7 @@
 
 set -e
 
-DATASET="/workspace/drr_patient_data_expanded"
+DATASET="/workspace/drr_patient_data"
 PHASE1_CHECKPOINT="checkpoints_direct256_b200_phase1/direct256_best_psnr.pth"
 CHECKPOINT_DIR="checkpoints_direct256_b200_phase2"
 
